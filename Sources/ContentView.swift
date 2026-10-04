@@ -391,6 +391,12 @@ struct PhotoCell: View {
 struct ImportBlockingOverlay: View {
     @ObservedObject var importer: ImportManager
 
+    private static let bytes: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f
+    }()
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.35)
@@ -402,6 +408,11 @@ struct ImportBlockingOverlay: View {
                         .font(.caption)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                }
+                if importer.currentFileTotalBytes > 0 {
+                    Text("\(Self.bytes.string(fromByteCount: importer.currentFileDownloadedBytes)) of \(Self.bytes.string(fromByteCount: importer.currentFileTotalBytes))")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
                 }
                 Text("\(importer.importedCount) imported · \(importer.skippedCount) skipped · \(importer.failedCount) failed")
                     .font(.caption)

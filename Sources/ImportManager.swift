@@ -18,6 +18,8 @@ final class ImportManager: NSObject, ObservableObject {
     @Published var failedCount = 0
 
     @Published var currentFileFraction: Double = 0
+    @Published var currentFileDownloadedBytes: Int64 = 0
+    @Published var currentFileTotalBytes: Int64 = 0
 
     private var queue: [PhotoItem] = []
     private var totalCount = 0
@@ -45,6 +47,8 @@ final class ImportManager: NSObject, ObservableObject {
         // the abandoned file is ignored via the activeFile check.
         isImporting = false
         currentFileName = ""
+        currentFileDownloadedBytes = 0
+        currentFileTotalBytes = 0
         log("Cancelled by user.")
     }
 
@@ -118,6 +122,8 @@ final class ImportManager: NSObject, ObservableObject {
             self.progress = Double(done - 1) / Double(max(self.totalCount, 1))
             self.currentFileName = item.name
             self.currentFileFraction = 0
+            self.currentFileDownloadedBytes = 0
+            self.currentFileTotalBytes = item.fileSize
             self.stopWatchdog()
 
             // Resolve final destination (Year/Month by default).
@@ -227,6 +233,8 @@ final class ImportManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             guard file === self.activeFile, maxBytes > 0 else { return }
             self.seenProgress = true
+            self.currentFileDownloadedBytes = Int64(downloadedBytes)
+            self.currentFileTotalBytes = Int64(maxBytes)
             self.currentFileFraction = min(1, Double(downloadedBytes) / Double(maxBytes))
             let done = self.totalCount - self.queue.count
             self.progress = (Double(done - 1) + self.currentFileFraction) / Double(max(self.totalCount, 1))
@@ -253,6 +261,8 @@ final class ImportManager: NSObject, ObservableObject {
             self.isImporting = false
             self.progress = 1
             self.currentFileName = ""
+            self.currentFileDownloadedBytes = 0
+            self.currentFileTotalBytes = 0
             self.log("Done. Imported: \(self.importedCount), skipped: \(self.skippedCount), failed: \(self.failedCount).")
         }
     }
