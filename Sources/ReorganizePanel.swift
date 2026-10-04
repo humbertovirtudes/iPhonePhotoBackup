@@ -1,6 +1,7 @@
 // ReorganizePanel.swift – sidebar UI for reorganizing a backup folder.
 
 import SwiftUI
+import AppKit
 
 /// Re-lays out the files already in a backup folder (year / year-month /
 /// year-month-day / photos-videos / location), moves stragglers into place
@@ -57,5 +58,39 @@ struct ReorganizePanel: View {
                     .textSelection(.enabled)
             }
         }
+    }
+}
+
+/// Full-window modal shown while reorganize runs. Covers the whole UI so
+/// nothing else can be clicked until the run completes or is cancelled.
+struct ReorganizeBlockingOverlay: View {
+    @ObservedObject var reorganizer: Reorganizer
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+            VStack(spacing: 12) {
+                Text(reorganizer.lastDryRun ? "Previewing folder…" : "Reorganizing folder…")
+                    .font(.headline)
+                ProgressView(value: reorganizer.progress) {
+                    Text(reorganizer.statusLine.isEmpty ? "Scanning…" : reorganizer.statusLine)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Text("Moves files into place, then removes emptied folders.\nYou can cancel anytime — finished moves are kept.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Cancel") { reorganizer.cancel() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(24)
+            .frame(width: 400)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .cornerRadius(12)
+            .shadow(radius: 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

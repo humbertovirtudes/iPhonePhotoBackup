@@ -60,6 +60,7 @@ xcodebuild test -project iPhonePhotoBackup.xcodeproj -scheme iPhonePhotoBackup \
 - Location layout shows "Unknown location": those files have no EXIF GPS (or no network for reverse-geocoding).
 - HEIC won't preview on old macOS: files still copy fine; open in Preview/Photos on Ventura+.
 - Download error `-9928` etc.: cable issue — try another cable/port, keep iPhone awake (Settings → Display → Never during backup).
+- Stalled download (`Stalled (no progress for 120s), skipping`): a hung transfer is failed automatically so the queue keeps moving; replug USB if it repeats.
 
 ## Notes / limitations
 

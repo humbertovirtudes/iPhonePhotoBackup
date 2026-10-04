@@ -59,6 +59,7 @@ final class Reorganizer: NSObject, ObservableObject {
     @Published var progress: Double = 0
     @Published var statusLine = ""
     @Published var logLines: [String] = []
+    @Published var lastDryRun = true
 
     private var cancelled = false
     var placeResolver = PlaceResolver()
@@ -112,6 +113,7 @@ final class Reorganizer: NSObject, ObservableObject {
         isRunning = true
         progress = 0
         cancelled = false
+        lastDryRun = dryRun
         logLines = []
         log(dryRun ? "Previewing reorganize of \(root.path) → \(scheme.title)…" : "Reorganizing \(root.path) → \(scheme.title)…")
         DispatchQueue.global(qos: .utility).async {

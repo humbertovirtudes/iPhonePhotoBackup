@@ -17,14 +17,25 @@ final class ImportManager: NSObject, ObservableObject {
     @Published var skippedCount = 0
     @Published var failedCount = 0
 
+    @Published var currentFileFraction: Double = 0
+
     private var queue: [PhotoItem] = []
     private var totalCount = 0
     private var destinationRoot: URL?
     private var scheme: OrganizationScheme = .yearMonth
     private var cancelled = false
 
+    /// Guards against late callbacks from abandoned (stalled) downloads.
+    private var activeFile: ICCameraFile?
+    private var transferGeneration = 0
+    private var watchdog: Timer?
+    /// Seconds without progress/completion before a download is declared stalled.
+    private let watchdogInterval: TimeInterval = 120
+
     func cancel() {
         cancelled = true
+        stopWatchdog()
+        activeFile = nil
         log("Cancelled by user.")
     }
 
@@ -64,6 +75,8 @@ final class ImportManager: NSObject, ObservableObject {
             let done = self.totalCount - self.queue.count
             self.progress = Double(done - 1) / Double(max(self.totalCount, 1))
             self.currentFileName = item.name
+            self.currentFileFraction = 0
+            self.stopWatchdog()
 
             // Resolve final destination (Year/Month by default).
             var dest = BackupOrganizer.destinationURL(for: item, root: root, scheme: self.scheme, isVideo: item.isVideo)
@@ -105,6 +118,8 @@ final class ImportManager: NSObject, ObservableObject {
                 .overwrite: true,
                 .sidecarFiles: true
             ]
+            self.activeFile = item.file
+            self.transferGeneration += 1
             device.requestDownloadFile(
                 item.file,
                 options: options,
@@ -112,7 +127,31 @@ final class ImportManager: NSObject, ObservableObject {
                 didDownloadSelector: #selector(ImportManager.didDownloadFile(_:error:options:contextInfo:)),
                 contextInfo: nil
             )
+            self.startWatchdog(generation: self.transferGeneration, fileName: item.name)
         }
+    }
+
+    // MARK: - Stall watchdog
+
+    private func startWatchdog(generation: Int, fileName: String) {
+        stopWatchdog()
+        watchdog = Timer.scheduledTimer(withTimeInterval: watchdogInterval, repeats: false) { [weak self] _ in
+            guard let self, self.transferGeneration == generation, self.isImporting, !self.cancelled else { return }
+            // No progress and no completion for 2 minutes: abandon this file,
+            // count it failed, and keep the queue moving. Any late callback
+            // for it is ignored via the activeFile check.
+            self.activeFile = nil
+            self.failedCount += 1
+            self.log("Stalled (no progress for \(Int(self.watchdogInterval))s), skipping: \(fileName). Replug USB if this repeats.")
+            let done = self.totalCount - self.queue.count
+            self.progress = Double(done) / Double(max(self.totalCount, 1))
+            self.downloadNext()
+        }
+    }
+
+    private func stopWatchdog() {
+        watchdog?.invalidate()
+        watchdog = nil
     }
 
     @objc func didDownloadFile(
@@ -122,6 +161,10 @@ final class ImportManager: NSObject, ObservableObject {
         contextInfo: UnsafeMutableRawPointer?
     ) {
         DispatchQueue.main.async {
+            // Ignore late callbacks from downloads abandoned by the watchdog.
+            guard file === self.activeFile else { return }
+            self.activeFile = nil
+            self.stopWatchdog()
             let name = file.name ?? "file"
             if let error {
                 self.failedCount += 1
@@ -133,6 +176,17 @@ final class ImportManager: NSObject, ObservableObject {
             let done = self.totalCount - self.queue.count
             self.progress = Double(done) / Double(max(self.totalCount, 1))
             self.downloadNext()
+        }
+    }
+
+    func didReceiveDownloadProgress(forFile file: ICCameraFile, downloadedBytes: Int, maxBytes: Int) {
+        DispatchQueue.main.async {
+            guard file === self.activeFile, maxBytes > 0 else { return }
+            self.currentFileFraction = min(1, Double(downloadedBytes) / Double(maxBytes))
+            let done = self.totalCount - self.queue.count
+            self.progress = (Double(done - 1) + self.currentFileFraction) / Double(max(self.totalCount, 1))
+            // Any sign of life resets the stall watchdog.
+            self.startWatchdog(generation: self.transferGeneration, fileName: file.name ?? "file")
         }
     }
 

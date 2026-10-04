@@ -29,15 +29,20 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            HStack(alignment: .top, spacing: 0) {
-                grid
-                sidebar
+        ZStack {
+            VStack(spacing: 0) {
+                header
+                Divider()
+                HStack(alignment: .top, spacing: 0) {
+                    grid
+                    sidebar
+                }
+                Divider()
+                footer
             }
-            Divider()
-            footer
+            if reorganizer.isRunning {
+                ReorganizeBlockingOverlay(reorganizer: reorganizer)
+            }
         }
         .onAppear {
             restoreDestination()
