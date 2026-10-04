@@ -38,6 +38,10 @@ final class ImportManager: NSObject, ObservableObject {
     private var seenProgress = false
     private var lastLoggedMilestone = 0
     private var lockObserver: NSObjectProtocol?
+    /// Fallback progress source: the destination file grows as bytes land,
+    /// even when the phone sends no progress callbacks at all.
+    private var pollTimer: Timer?
+    private var lastPolledSize: Int64 = -1
     private var activeItem: PhotoItem?
     private var activeDest: URL?
     private var downloadStartTime = Date()
@@ -45,7 +49,7 @@ final class ImportManager: NSObject, ObservableObject {
 
     func cancel() {
         cancelled = true
-        stopWatchdog()
+        stopTransferTimers()
         activeFile = nil
         // Dismiss the overlay right away; any late download callback for
         // the abandoned file is ignored via the activeFile check.
@@ -83,7 +87,7 @@ final class ImportManager: NSObject, ObservableObject {
         activeFile = nil
         activeItem = nil
         activeDest = nil
-        stopWatchdog()
+        stopTransferTimers()
         failedCount += 1
         log(reason)
         let done = totalCount - queue.count
@@ -132,7 +136,7 @@ final class ImportManager: NSObject, ObservableObject {
             self.currentFileDownloadedBytes = 0
             self.currentFileTotalBytes = item.fileSize
             self.retriedCurrent = false
-            self.stopWatchdog()
+            self.stopTransferTimers()
 
             // Resolve final destination (Year/Month by default).
             var dest = BackupOrganizer.destinationURL(for: item, root: root, scheme: self.scheme, isVideo: item.isVideo)
@@ -187,6 +191,7 @@ final class ImportManager: NSObject, ObservableObject {
             self.transferGeneration += 1
             self.seenProgress = false
             self.lastLoggedMilestone = 0
+            self.lastPolledSize = -1
             self.downloadStartTime = Date()
             let sizeString: String = {
                 let f = ByteCountFormatter()
@@ -202,6 +207,7 @@ final class ImportManager: NSObject, ObservableObject {
                 contextInfo: nil
             )
             self.startWatchdog(generation: self.transferGeneration, fileName: item.name)
+            self.startPoll()
         }
     }
 
@@ -239,6 +245,44 @@ final class ImportManager: NSObject, ObservableObject {
         watchdog = nil
     }
 
+    private func stopTransferTimers() {
+        stopWatchdog()
+        stopPoll()
+    }
+
+    /// Watches the destination file itself grow. Works even when the phone
+    /// sends no progress callbacks: any growth resets the stall watchdog,
+    /// and the byte counter in the UI follows the real file size.
+    private func startPoll() {
+        stopPoll()
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.pollDownload()
+        }
+    }
+
+    private func stopPoll() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+    }
+
+    private func pollDownload() {
+        guard isImporting, !cancelled,
+              activeFile != nil, let dest = activeDest else {
+            stopPoll()
+            return
+        }
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: dest.path)[.size]) as? NSNumber else { return }
+        let bytes = size.int64Value
+        guard bytes != lastPolledSize else { return } // no growth; watchdog decides stalls
+        lastPolledSize = bytes
+        currentFileDownloadedBytes = bytes
+        let total = max(currentFileTotalBytes, 1)
+        currentFileFraction = min(1, Double(bytes) / Double(total))
+        let done = totalCount - queue.count
+        progress = (Double(done - 1) + currentFileFraction) / Double(max(totalCount, 1))
+        startWatchdog(generation: transferGeneration, fileName: activeFile?.name ?? "file")
+    }
+
     @objc func didDownloadFile(
         _ file: ICCameraFile,
         error: Error?,
@@ -249,7 +293,7 @@ final class ImportManager: NSObject, ObservableObject {
             // Ignore late callbacks from downloads abandoned by the watchdog.
             guard file === self.activeFile else { return }
             self.activeFile = nil
-            self.stopWatchdog()
+            self.stopTransferTimers()
             let name = file.name ?? "file"
             let elapsed = Date().timeIntervalSince(self.downloadStartTime)
             let elapsedString = String(format: "%.1fs", elapsed)
