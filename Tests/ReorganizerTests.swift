@@ -53,6 +53,20 @@ final class ReorganizerTests: XCTestCase {
         XCTAssertEqual(plan.alreadyOrganized, 1)
     }
 
+    func testAnalyzeReportsScanProgress() throws {
+        for i in 0..<12 {
+            try seed(path: "inbox/f\(i).HEIC", bytes: 10, date: fixtureDate(2026, 10, 4))
+        }
+        var calls = 0
+        var lastSeen = 0
+        _ = Reorganizer().analyze(root: root, scheme: .yearMonth) { seen, _ in
+            calls += 1
+            lastSeen = seen
+        }
+        XCTAssertGreaterThan(calls, 0, "scan should report progress, not sit silent")
+        XCTAssertEqual(lastSeen, 10, "callback fires every 5 files")
+    }
+
     // MARK: - Running
 
     func testRunMovesFilesAndPrunesEmptyFolders() throws {

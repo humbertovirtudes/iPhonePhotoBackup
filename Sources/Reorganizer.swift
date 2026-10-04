@@ -74,15 +74,21 @@ final class Reorganizer: NSObject, ObservableObject {
     }
 
     /// Scan + compute destinations without moving anything.
-    func analyze(root: URL, scheme: OrganizationScheme) -> Plan {
+    /// `onScan` reports (filesSeen, currentFile) so the UI can show
+    /// live progress through slow scans (EXIF reads, location lookups).
+    func analyze(root: URL, scheme: OrganizationScheme,
+                 onScan: ((Int, URL) -> Void)? = nil) -> Plan {
         var plan = Plan()
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: root, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
             options: [.skipsHiddenFiles]) else { return plan }
+        var seen = 0
         for case let url as URL in enumerator {
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
             if url.lastPathComponent.hasPrefix(".") { continue }
+            seen += 1
+            if seen % 5 == 0 { onScan?(seen, url) }
             let date = MediaAnalyzer.captureDate(at: url) ?? Date.distantPast
             let stub = MoveStub(name: url.lastPathComponent, fileSize: 0, creationDate: date)
             let video = MediaType.isVideoFile(fileName: url.lastPathComponent)
@@ -116,8 +122,14 @@ final class Reorganizer: NSObject, ObservableObject {
         lastDryRun = dryRun
         logLines = []
         log(dryRun ? "Previewing reorganize of \(root.path) → \(scheme.title)…" : "Reorganizing \(root.path) → \(scheme.title)…")
+        statusLine = "Scanning backup folder…"
         DispatchQueue.global(qos: .utility).async {
-            let plan = self.analyze(root: root, scheme: scheme)
+            let plan = self.analyze(root: root, scheme: scheme) { seen, url in
+                DispatchQueue.main.async {
+                    // Scan total is unknown upfront: show files seen + live path.
+                    self.statusLine = "Scanning (\(seen) files): \(url.path)"
+                }
+            }
             let total = plan.moves.count
             var moved = 0, failed = 0
             if total == 0 {
