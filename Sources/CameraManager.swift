@@ -88,7 +88,10 @@ final class CameraManager: NSObject, ObservableObject {
                 ? "No photos found on \(device.name ?? "iPhone"). Catalog may still be loading — wait a few seconds."
                 : "\(newItems.count) items found on \(device.name ?? "iPhone")."
             // Kick off thumbnail requests (throttled to first 300 to stay responsive).
-            for item in newItems.prefix(300) {
+            // Videos excluded: on-device video thumbnails are expensive to render
+            // and compete with downloads on the same PTP channel (their grid
+            // cells already show a VIDEO badge instead).
+            for item in newItems.prefix(300) where !item.isVideo {
                 item.file.requestThumbnail()
             }
         }

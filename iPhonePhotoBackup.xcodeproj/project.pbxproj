@@ -21,6 +21,7 @@
 		000000000000000000000034 = {isa = PBXBuildFile; fileRef = 000000000000000000000032; };
 		000000000000000000000037 = {isa = PBXBuildFile; fileRef = 000000000000000000000035; };
 		000000000000000000000038 = {isa = PBXBuildFile; fileRef = 000000000000000000000036; };
+		00000000000000000000003A = {isa = PBXBuildFile; fileRef = 000000000000000000000039; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +42,7 @@
 		000000000000000000000032 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReorganizerTests.swift; sourceTree = "<group>"; };
 		000000000000000000000035 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reorganizer.swift; sourceTree = "<group>"; };
 		000000000000000000000036 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReorganizePanel.swift; sourceTree = "<group>"; };
+		000000000000000000000039 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadDelegateTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -112,6 +114,7 @@
 				00000000000000000000002A,
 				000000000000000000000031,
 				000000000000000000000032,
+				000000000000000000000039,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -231,6 +234,7 @@
 				00000000000000000000002C,
 				000000000000000000000033,
 				000000000000000000000034,
+				00000000000000000000003A,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

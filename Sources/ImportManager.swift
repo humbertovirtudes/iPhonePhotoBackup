@@ -38,6 +38,10 @@ final class ImportManager: NSObject, ObservableObject {
     private var seenProgress = false
     private var lastLoggedMilestone = 0
     private var lockObserver: NSObjectProtocol?
+    private var activeItem: PhotoItem?
+    private var activeDest: URL?
+    private var downloadStartTime = Date()
+    private var retriedCurrent = false
 
     func cancel() {
         cancelled = true
@@ -77,6 +81,8 @@ final class ImportManager: NSObject, ObservableObject {
     /// Late callbacks for it are ignored via the activeFile check.
     private func abandonActiveFile(reason: String) {
         activeFile = nil
+        activeItem = nil
+        activeDest = nil
         stopWatchdog()
         failedCount += 1
         log(reason)
@@ -102,6 +108,7 @@ final class ImportManager: NSObject, ObservableObject {
         skippedCount = 0
         failedCount = 0
         log("Starting backup of \(items.count) item(s) to \(root.path)")
+        log("delegate selectors: \(NSStringFromSelector(#selector(ImportManager.didDownloadFile(_:error:options:contextInfo:)))) / \(NSStringFromSelector(#selector(ImportManager.didReceiveDownloadProgress(for:downloadedBytes:maxBytes:))))")
         downloadNext()
     }
 
@@ -124,6 +131,7 @@ final class ImportManager: NSObject, ObservableObject {
             self.currentFileFraction = 0
             self.currentFileDownloadedBytes = 0
             self.currentFileTotalBytes = item.fileSize
+            self.retriedCurrent = false
             self.stopWatchdog()
 
             // Resolve final destination (Year/Month by default).
@@ -160,6 +168,13 @@ final class ImportManager: NSObject, ObservableObject {
                 return
             }
 
+            self.startDownload(item: item, dest: dest, device: device)
+        }
+    }
+
+    /// Issues one download request (initial attempt or single retry).
+    private func startDownload(item: PhotoItem, dest: URL, device: ICCameraDevice) {
+        DispatchQueue.main.async {
             let options: [ICDownloadOption: Any] = [
                 .downloadsDirectoryURL: dest.deletingLastPathComponent(),
                 .saveAsFilename: dest.lastPathComponent,
@@ -167,15 +182,18 @@ final class ImportManager: NSObject, ObservableObject {
                 .sidecarFiles: true
             ]
             self.activeFile = item.file
+            self.activeItem = item
+            self.activeDest = dest
             self.transferGeneration += 1
             self.seenProgress = false
             self.lastLoggedMilestone = 0
+            self.downloadStartTime = Date()
             let sizeString: String = {
                 let f = ByteCountFormatter()
                 f.countStyle = .file
                 return f.string(fromByteCount: item.fileSize)
             }()
-            self.log("Downloading \(item.name) (\(sizeString))…")
+            self.log("Downloading \(item.name) (\(sizeString)) → \(dest.path)")
             device.requestDownloadFile(
                 item.file,
                 options: options,
@@ -187,6 +205,19 @@ final class ImportManager: NSObject, ObservableObject {
         }
     }
 
+    /// Re-issues the in-flight request once; returns false when the single
+    /// retry was already used (caller should fail the file).
+    private func retryActiveDownload() -> Bool {
+        guard !retriedCurrent,
+              let item = activeItem,
+              let dest = activeDest,
+              let device = item.file.device else { return false }
+        retriedCurrent = true
+        log("Retrying: \(item.name)")
+        startDownload(item: item, dest: dest, device: device)
+        return true
+    }
+
     // MARK: - Stall watchdog
 
     private func startWatchdog(generation: Int, fileName: String) {
@@ -195,7 +226,11 @@ final class ImportManager: NSObject, ObservableObject {
         let interval = seenProgress ? watchdogInterval : watchdogFirstByteInterval
         watchdog = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             guard let self, self.transferGeneration == generation, self.isImporting, !self.cancelled else { return }
-            self.abandonActiveFile(reason: "Stalled (no progress for \(Int(interval))s), skipping: \(fileName). Replug USB if this repeats.")
+            if self.retryActiveDownload() {
+                // Retry gets its own full grace period (new watchdog inside).
+            } else {
+                self.abandonActiveFile(reason: "Stalled (no progress for \(Int(interval))s, retry used), skipping: \(fileName). Replug USB if this repeats.")
+            }
         }
     }
 
@@ -216,25 +251,49 @@ final class ImportManager: NSObject, ObservableObject {
             self.activeFile = nil
             self.stopWatchdog()
             let name = file.name ?? "file"
+            let elapsed = Date().timeIntervalSince(self.downloadStartTime)
+            let elapsedString = String(format: "%.1fs", elapsed)
             if let error {
-                self.failedCount += 1
-                self.log("Failed \(name): \(error.localizedDescription)")
-            } else {
-                self.importedCount += 1
-                self.log("Backed up: \(name)")
+                self.failActiveFile("Failed \(name) (\(elapsedString)): \(error.localizedDescription)")
+                return
             }
-            let done = self.totalCount - self.queue.count
-            self.progress = Double(done) / Double(max(self.totalCount, 1))
-            self.downloadNext()
+            // Verify the landed file: catches partial/corrupt transfers.
+            if let dest = self.activeDest,
+               let size = (try? FileManager.default.attributesOfItem(atPath: dest.path)[.size]) as? NSNumber,
+               size.int64Value == Int64(file.fileSize) {
+                self.activeItem = nil
+                self.activeDest = nil
+                self.importedCount += 1
+                self.log("Backed up: \(name) (\(elapsedString))")
+                let done = self.totalCount - self.queue.count
+                self.progress = Double(done) / Double(max(self.totalCount, 1))
+                self.downloadNext()
+            } else if self.retryActiveDownload() {
+                // Single retry re-issued; its completion continues the queue.
+            } else {
+                self.failActiveFile("Failed \(name): downloaded file missing or wrong size after retry.")
+            }
         }
     }
 
-    func didReceiveDownloadProgress(forFile file: ICCameraFile, downloadedBytes: Int, maxBytes: Int) {
+    private func failActiveFile(_ message: String) {
+        activeItem = nil
+        activeDest = nil
+        failedCount += 1
+        log(message)
+        let done = totalCount - queue.count
+        progress = Double(done) / Double(max(totalCount, 1))
+        downloadNext()
+    }
+
+    // Note: off_t imports as Int64 (not Int) — using Int here compiles but
+    // silently never matches the protocol witness, so progress is never called.
+    func didReceiveDownloadProgress(for file: ICCameraFile, downloadedBytes: Int64, maxBytes: Int64) {
         DispatchQueue.main.async {
             guard file === self.activeFile, maxBytes > 0 else { return }
             self.seenProgress = true
-            self.currentFileDownloadedBytes = Int64(downloadedBytes)
-            self.currentFileTotalBytes = Int64(maxBytes)
+            self.currentFileDownloadedBytes = downloadedBytes
+            self.currentFileTotalBytes = maxBytes
             self.currentFileFraction = min(1, Double(downloadedBytes) / Double(maxBytes))
             let done = self.totalCount - self.queue.count
             self.progress = (Double(done - 1) + self.currentFileFraction) / Double(max(self.totalCount, 1))
