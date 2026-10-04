@@ -221,6 +221,8 @@ extension CameraManager: ICCameraDeviceDelegate {
             self.statusMessage = "iPhone locked – unlock it to browse photos."
             self.items = []
             self.isLoadingCatalog = false
+            // Fail any in-flight download fast (it would stall otherwise).
+            NotificationCenter.default.post(name: .cameraAccessRestricted, object: nil)
         }
     }
 

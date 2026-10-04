@@ -62,10 +62,19 @@ final class Reorganizer: NSObject, ObservableObject {
     @Published var lastDryRun = true
 
     private var cancelled = false
+    /// Bumps on every run/cancel so a stale background loop can never
+    /// touch state (or dismiss the overlay) of a newer run.
+    private var runGeneration = 0
     var placeResolver = PlaceResolver()
 
     func cancel() {
         cancelled = true
+        runGeneration += 1
+        // Dismiss the overlay right away; the background loop bails out
+        // via the generation check.
+        isRunning = false
+        statusLine = ""
+        log("Cancelled by user.")
     }
 
     struct Plan {
@@ -77,7 +86,8 @@ final class Reorganizer: NSObject, ObservableObject {
     /// `onScan` reports (filesSeen, currentFile) so the UI can show
     /// live progress through slow scans (EXIF reads, location lookups).
     func analyze(root: URL, scheme: OrganizationScheme,
-                 onScan: ((Int, URL) -> Void)? = nil) -> Plan {
+                 onScan: ((Int, URL) -> Void)? = nil,
+                 shouldStop: (() -> Bool)? = nil) -> Plan {
         var plan = Plan()
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
@@ -89,6 +99,7 @@ final class Reorganizer: NSObject, ObservableObject {
             if url.lastPathComponent.hasPrefix(".") { continue }
             seen += 1
             if seen % 5 == 0 { onScan?(seen, url) }
+            if seen % 20 == 0, shouldStop?() == true { return plan }
             let date = MediaAnalyzer.captureDate(at: url) ?? Date.distantPast
             let stub = MoveStub(name: url.lastPathComponent, fileSize: 0, creationDate: date)
             let video = MediaType.isVideoFile(fileName: url.lastPathComponent)
@@ -119,24 +130,28 @@ final class Reorganizer: NSObject, ObservableObject {
         isRunning = true
         progress = 0
         cancelled = false
+        runGeneration += 1
+        let gen = runGeneration
         lastDryRun = dryRun
         logLines = []
         log(dryRun ? "Previewing reorganize of \(root.path) → \(scheme.title)…" : "Reorganizing \(root.path) → \(scheme.title)…")
         statusLine = "Scanning backup folder…"
         DispatchQueue.global(qos: .utility).async {
-            let plan = self.analyze(root: root, scheme: scheme) { seen, url in
+            let stopped = { gen != self.runGeneration || self.cancelled }
+            let plan = self.analyze(root: root, scheme: scheme, onScan: { seen, url in
                 DispatchQueue.main.async {
                     // Scan total is unknown upfront: show files seen + live path.
                     self.statusLine = "Scanning (\(seen) files): \(url.path)"
                 }
-            }
+            }, shouldStop: stopped)
+            guard !stopped() else { return }
             let total = plan.moves.count
             var moved = 0, failed = 0
             if total == 0 {
                 self.log("Nothing to move — \(plan.alreadyOrganized) file(s) already organized.")
             }
             for (i, m) in plan.moves.enumerated() {
-                if self.cancelled { self.log("Cancelled."); break }
+                if stopped() { break }
                 DispatchQueue.main.async {
                     self.progress = Double(i) / Double(max(total, 1))
                     self.statusLine = m.source.lastPathComponent
@@ -160,9 +175,12 @@ final class Reorganizer: NSObject, ObservableObject {
                 }
             }
             var pruned = 0
-            if !dryRun && !self.cancelled {
+            if !dryRun && !stopped() {
                 pruned = Self.pruneEmptyFolders(under: root)
             }
+            // A cancel (or a newer run) already dismissed the overlay and
+            // logged; don't summarize a run that didn't finish.
+            guard !stopped() else { return }
             DispatchQueue.main.async {
                 self.progress = 1
                 self.statusLine = ""

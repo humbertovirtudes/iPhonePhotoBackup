@@ -31,12 +31,54 @@ final class ImportManager: NSObject, ObservableObject {
     private var watchdog: Timer?
     /// Seconds without progress/completion before a download is declared stalled.
     private let watchdogInterval: TimeInterval = 120
+    /// Shorter grace before the first byte (a healthy transfer starts fast).
+    private let watchdogFirstByteInterval: TimeInterval = 60
+    private var seenProgress = false
+    private var lastLoggedMilestone = 0
+    private var lockObserver: NSObjectProtocol?
 
     func cancel() {
         cancelled = true
         stopWatchdog()
         activeFile = nil
+        // Dismiss the overlay right away; any late download callback for
+        // the abandoned file is ignored via the activeFile check.
+        isImporting = false
+        currentFileName = ""
         log("Cancelled by user.")
+    }
+
+    // MARK: - Device lock
+
+    override init() {
+        super.init()
+        lockObserver = NotificationCenter.default.addObserver(
+            forName: .cameraAccessRestricted, object: nil, queue: .main) { [weak self] _ in
+                self?.handleDeviceLock()
+            }
+    }
+
+    deinit {
+        if let lockObserver { NotificationCenter.default.removeObserver(lockObserver) }
+    }
+
+    /// The iPhone locked mid-transfer: fail the in-flight file fast instead
+    /// of waiting out the watchdog, then keep the queue moving.
+    private func handleDeviceLock() {
+        guard isImporting, !cancelled, activeFile != nil else { return }
+        abandonActiveFile(reason: "iPhone locked mid-download — unlock it, then retry.")
+    }
+
+    /// Gives up on the current file (stall or lock) and advances the queue.
+    /// Late callbacks for it are ignored via the activeFile check.
+    private func abandonActiveFile(reason: String) {
+        activeFile = nil
+        stopWatchdog()
+        failedCount += 1
+        log(reason)
+        let done = totalCount - queue.count
+        progress = Double(done) / Double(max(totalCount, 1))
+        downloadNext()
     }
 
     func importItems(_ items: [PhotoItem], to root: URL, scheme: OrganizationScheme = .yearMonth) {
@@ -120,6 +162,14 @@ final class ImportManager: NSObject, ObservableObject {
             ]
             self.activeFile = item.file
             self.transferGeneration += 1
+            self.seenProgress = false
+            self.lastLoggedMilestone = 0
+            let sizeString: String = {
+                let f = ByteCountFormatter()
+                f.countStyle = .file
+                return f.string(fromByteCount: item.fileSize)
+            }()
+            self.log("Downloading \(item.name) (\(sizeString))…")
             device.requestDownloadFile(
                 item.file,
                 options: options,
@@ -135,17 +185,11 @@ final class ImportManager: NSObject, ObservableObject {
 
     private func startWatchdog(generation: Int, fileName: String) {
         stopWatchdog()
-        watchdog = Timer.scheduledTimer(withTimeInterval: watchdogInterval, repeats: false) { [weak self] _ in
+        // Tighter grace before the first byte; once bytes flow, allow gaps.
+        let interval = seenProgress ? watchdogInterval : watchdogFirstByteInterval
+        watchdog = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             guard let self, self.transferGeneration == generation, self.isImporting, !self.cancelled else { return }
-            // No progress and no completion for 2 minutes: abandon this file,
-            // count it failed, and keep the queue moving. Any late callback
-            // for it is ignored via the activeFile check.
-            self.activeFile = nil
-            self.failedCount += 1
-            self.log("Stalled (no progress for \(Int(self.watchdogInterval))s), skipping: \(fileName). Replug USB if this repeats.")
-            let done = self.totalCount - self.queue.count
-            self.progress = Double(done) / Double(max(self.totalCount, 1))
-            self.downloadNext()
+            self.abandonActiveFile(reason: "Stalled (no progress for \(Int(interval))s), skipping: \(fileName). Replug USB if this repeats.")
         }
     }
 
@@ -182,9 +226,17 @@ final class ImportManager: NSObject, ObservableObject {
     func didReceiveDownloadProgress(forFile file: ICCameraFile, downloadedBytes: Int, maxBytes: Int) {
         DispatchQueue.main.async {
             guard file === self.activeFile, maxBytes > 0 else { return }
+            self.seenProgress = true
             self.currentFileFraction = min(1, Double(downloadedBytes) / Double(maxBytes))
             let done = self.totalCount - self.queue.count
             self.progress = (Double(done - 1) + self.currentFileFraction) / Double(max(self.totalCount, 1))
+            let pct = Int(self.currentFileFraction * 100)
+            if pct >= self.lastLoggedMilestone + 25 {
+                self.lastLoggedMilestone = pct - (pct % 25)
+                let f = ByteCountFormatter()
+                f.countStyle = .file
+                self.log("\(file.name ?? "file"): \(pct)% (\(f.string(fromByteCount: Int64(downloadedBytes))) of \(f.string(fromByteCount: Int64(maxBytes)))")
+            }
             // Any sign of life resets the stall watchdog.
             self.startWatchdog(generation: self.transferGeneration, fileName: file.name ?? "file")
         }
@@ -192,6 +244,12 @@ final class ImportManager: NSObject, ObservableObject {
 
     private func finish() {
         DispatchQueue.main.async {
+            // A fresh import may already be running after a cancel; only
+            // summarize the run that actually completed.
+            guard !self.cancelled else {
+                self.isImporting = false
+                return
+            }
             self.isImporting = false
             self.progress = 1
             self.currentFileName = ""
@@ -213,3 +271,8 @@ final class ImportManager: NSObject, ObservableObject {
 // ICCameraDeviceDownloadDelegate conformance (methods are @objc-optional,
 // implemented above). Declared explicitly so the selector dispatch works.
 extension ImportManager: ICCameraDeviceDownloadDelegate {}
+
+extension Notification.Name {
+    /// Posted when the iPhone locks mid-session (media access revoked).
+    static let cameraAccessRestricted = Notification.Name("cameraAccessRestricted")
+}
