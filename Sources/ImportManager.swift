@@ -20,6 +20,7 @@ final class ImportManager: NSObject, ObservableObject {
     private var queue: [PhotoItem] = []
     private var totalCount = 0
     private var destinationRoot: URL?
+    private var scheme: OrganizationScheme = .yearMonth
     private var cancelled = false
 
     func cancel() {
@@ -27,7 +28,7 @@ final class ImportManager: NSObject, ObservableObject {
         log("Cancelled by user.")
     }
 
-    func importItems(_ items: [PhotoItem], to root: URL) {
+    func importItems(_ items: [PhotoItem], to root: URL, scheme: OrganizationScheme = .yearMonth) {
         guard !isImporting else { return }
         guard !items.isEmpty else {
             log("Nothing to import.")
@@ -36,6 +37,7 @@ final class ImportManager: NSObject, ObservableObject {
         queue = items
         totalCount = items.count
         destinationRoot = root
+        self.scheme = scheme
         cancelled = false
         isImporting = true
         progress = 0
@@ -63,8 +65,8 @@ final class ImportManager: NSObject, ObservableObject {
             self.progress = Double(done - 1) / Double(max(self.totalCount, 1))
             self.currentFileName = item.name
 
-            // Resolve final Year/MM-dd destination.
-            var dest = BackupOrganizer.destinationURL(for: item, root: root)
+            // Resolve final destination (Year/Month by default).
+            var dest = BackupOrganizer.destinationURL(for: item, root: root, scheme: self.scheme, isVideo: item.isVideo)
 
             // Skip exact duplicates (same name + same byte size).
             if BackupOrganizer.isDuplicate(item: item, at: dest) {

@@ -9,11 +9,14 @@ private let bookmarkKey = "destinationBookmark"
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
     @StateObject private var importer = ImportManager()
+    @StateObject private var reorganizer = Reorganizer()
 
     @State private var destination: URL?
     @State private var selection = Set<String>()
     @State private var search = ""
     @State private var showVideosOnly = false
+    @State private var importScheme: OrganizationScheme = .yearMonth
+    @State private var newCount: Int?
 
     var filtered: [PhotoItem] {
         var list = camera.items
@@ -103,10 +106,11 @@ struct ContentView: View {
                 .disabled(selection.isEmpty || importer.isImporting || destination == nil)
                 .keyboardShortcut(.defaultAction)
 
-                Button("Import all new") {
+                Button(newCount.map { "Import all new (\($0))" } ?? "Import all new") {
                     importAllNew()
                 }
-                .disabled(camera.items.isEmpty || importer.isImporting || destination == nil)
+                .disabled(camera.items.isEmpty || importer.isImporting || destination == nil || newCount == 0)
+                .help(newCount.map { "\($0) item(s) not yet in the backup folder" } ?? "Copy everything not yet backed up")
 
                 if importer.isImporting {
                     Button("Cancel") { importer.cancel() }
@@ -118,6 +122,13 @@ struct ContentView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 220)
                 Toggle("Videos only", isOn: $showVideosOnly)
+                Picker("Layout:", selection: $importScheme) {
+                    ForEach(OrganizationScheme.importCases) { s in
+                        Text(s.title).tag(s)
+                    }
+                }
+                .frame(maxWidth: 200)
+                .help("Folder layout for new imports, e.g. \(importScheme.example)")
                 Spacer()
                 Text("\(filtered.count) items · \(selection.count) selected")
                     .font(.caption)
@@ -125,6 +136,23 @@ struct ContentView: View {
             }
         }
         .padding(12)
+        .task(id: refreshKey) {
+            guard let dest = destination, !camera.items.isEmpty else {
+                newCount = nil
+                return
+            }
+            let items = camera.items
+            let scheme = importScheme
+            let n = await Task.detached(priority: .utility) {
+                BackupOrganizer.newItemCount(items, root: dest, scheme: scheme)
+            }.value
+            guard !Task.isCancelled else { return }
+            newCount = n
+        }
+    }
+
+    var refreshKey: String {
+        "\(camera.items.count)-\(destination?.path ?? "")-\(importScheme.rawValue)-\(importer.importedCount)"
     }
 
     // MARK: - Grid
@@ -174,32 +202,36 @@ struct ContentView: View {
     // MARK: - Sidebar (help + destination info)
 
     var sidebar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Backup")
-                .font(.headline)
-            if let dest = destination {
-                Text(dest.path)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Backup")
+                    .font(.headline)
+                if let dest = destination {
+                    Text(dest.path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                    Text("New imports go to:\n\(importScheme.example)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No folder chosen yet. Pick a folder on your Mac or external drive.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Divider()
+                ReorganizePanel(reorganizer: reorganizer, root: destination)
+                Divider()
+                Text("How it works")
+                    .font(.headline)
+                Text("• USB only — files copy straight off the iPhone.\n• Duplicates matched by name, size and capture date.\n• Videos, Live Photos and HEIC kept as-is.\n• Works with external hard drives.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                Text("Organized as:\n\(dest.lastPathComponent)/YYYY/MM-dd/filename")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("No folder chosen yet. Pick a folder on your Mac or external drive.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Spacer()
             }
-            Divider()
-            Text("How it works")
-                .font(.headline)
-            Text("• USB only — files copy straight off the iPhone.\n• Year / Month-Day folders.\n• Existing same-size files are skipped.\n• Videos, Live Photos and HEIC kept as-is.\n• Works with external hard drives.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
+            .padding(12)
         }
-        .padding(12)
-        .frame(width: 240)
+        .frame(width: 260)
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
@@ -240,13 +272,13 @@ struct ContentView: View {
     func importSelected() {
         guard let dest = destination else { return }
         let items = camera.items.filter { selection.contains($0.id) }
-        importer.importItems(items, to: dest)
+        importer.importItems(items, to: dest, scheme: importScheme)
     }
 
     func importAllNew() {
         guard let dest = destination else { return }
-        // ImportManager skips duplicates by size, so "all" == "all new".
-        importer.importItems(camera.items, to: dest)
+        // ImportManager skips duplicates, so "all" == "all new".
+        importer.importItems(camera.items, to: dest, scheme: importScheme)
     }
 
     func chooseDestination() {

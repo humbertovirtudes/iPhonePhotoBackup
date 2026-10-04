@@ -4,60 +4,66 @@ Native SwiftUI macOS app that imports photos/videos from an iPhone connected via
 to any folder on this Mac, including an external hard drive.
 
 - Direct USB via Apple's **ImageCaptureCore** (`ICDeviceBrowser` / `ICCameraDevice`) — same tech as Image Capture.
-- Organization: `<backup-root>/YYYY/MM-dd/<original-filename>` (e.g. `Backup/2026/10-04/IMG_1234.HEIC`)
-- Modes: pick individual photos (thumbnails + search) **or** one-click **Import all new**
-- Duplicates: files that already exist with the same byte size are skipped; name collisions get `_1`, `_2` suffixes
-- Formats: everything as-is — HEIC, JPEG, PNG, MOV/MP4, Live Photo parts (sidecar files on)
+- Organization: `<backup-root>/YYYY/MM/<original-filename>` by default (e.g. `Backup/2026/10/IMG_1234.HEIC`),
+  with Year, Year/Month-Day and Photos/Videos layouts available per import.
+- Modes: pick individual photos (thumbnails + search) **or** one-click **Import all new (N)** with a live count.
+- Duplicates: matched by filename + byte size + capture date (EXIF-verified for photos when readable);
+  genuine collisions keep both via `_1`, `_2` suffixes.
+- **Reorganize** any existing backup folder into a new layout (year, year/month, year/month/day,
+  photos/videos, or GPS location) — moves files, then deletes emptied folders. Dry-run preview included.
+- Formats: everything as-is — HEIC, JPEG, PNG, MOV/MP4, Live Photo parts (sidecar files on).
 
 ## Requirements
 
-- macOS 13 Ventura or later (arm64/Intel), tested conceptually for macOS 14/15
-- **Xcode 15+** from the App Store (~15 GB) — this Mac doesn't have it yet
+- macOS 13 Ventura or later (arm64/Intel)
+- **Xcode 15+** (project + 37-test suite build with `xcodebuild`)
 - iPhone + USB cable (USB-C/Lightning). Unlock + tap **Trust** when prompted.
 
-> This Mac currently has **no Xcode / command-line tools**, so the project sources below
-> are complete but have not been compiled here. Follow "Create the project" once Xcode is installed.
+## Sources
 
-## Sources in `Sources/`
+- `Sources/` — app code (`CameraManager`, `ImportManager`, `Reorganizer`, `Models`, UI, entitlements)
+- `Assets.xcassets` — AppIcon (generated: blue photo tile + green import badge)
+- `Tests/` — XCTest suite: folder layouts, dupe rules, EXIF/GPS parsing, reorganize moves
+- `iPhonePhotoBackup.xcodeproj` — app + `iPhonePhotoBackupTests` targets, shared scheme
 
-- `iPhonePhotoBackupApp.swift` — `@main` App entry
-- `Models.swift` — `PhotoItem` + `BackupOrganizer` (Year/Month-Day + dedupe)
-- `CameraManager.swift` — USB discovery, session, catalog flattening, thumbnails
-- `ImportManager.swift` — sequential download queue straight to final folders
-- `ContentView.swift` — device picker, backup-folder picker (external drives OK), grid, progress + log
-- `iPhonePhotoBackup.entitlements` — sandbox + `user-selected.read-write` + `device.usb`
+## Open and run
 
-## Open and run (after installing Xcode)
+1. Double-click `iPhonePhotoBackup.xcodeproj`.
+2. Select target `iPhonePhotoBackup` → Signing & Capabilities → choose your Team (free Apple ID works for local run, or build ad-hoc — hardened runtime is then off).
+3. Press ⌘R. Connect iPhone via USB, unlock, tap Trust.
 
-1. Install Xcode from the App Store, open it once, then:
-   ```bash
-   sudo xcode-select --switch /Applications/Xcode.app
-   xcodebuild -runFirstLaunch
-   ```
-2. Double-click `iPhonePhotoBackup.xcodeproj` in this folder.
-3. Select target `iPhonePhotoBackup` → Signing & Capabilities → choose your Team (free Apple ID works for local run). Bundle ID `com.example.iPhonePhotoBackup` can stay or be renamed.
-4. Press ⌘R. Connect iPhone via USB, unlock, tap Trust.
+Entitlements (`device.usb`, `user-selected.read-write`, `network.client` for location lookup) and the
+`ImageCaptureCore.framework` link are already configured.
 
-Entitlements (`Sources/iPhonePhotoBackup.entitlements`) and the `ImageCaptureCore.framework` link are already configured in the project.
+## Tests
+
+```bash
+xcodebuild test -project iPhonePhotoBackup.xcodeproj -scheme iPhonePhotoBackup \
+  -destination 'platform=macOS' CODE_SIGN_IDENTITY="-"
+```
 
 ## Use
 
 1. Pick device (top-left, auto-selected).
 2. **Choose backup folder…** — internal folder or external hard drive (e.g. `/Volumes/MyDrive/iPhoneBackup`). Remembered across launches via security-scoped bookmark.
-3. Wait for catalog (`N items found`), thumbnails fill in.
-4. Either tick photos → **Import selected**, or **Import all new** (skips existing automatically).
-5. Watch progress + log at the bottom. Structure created: `YYYY/MM-dd/`.
+3. Pick a layout (Year / Year-Month / Year-Month-Day / Photos-Videos). Wait for catalog, thumbnails fill in.
+4. Either tick photos → **Import selected**, or **Import all new (N)** — N counts what's actually missing.
+5. Watch progress + log at the bottom.
+6. **Reorganize folder** (sidebar): point at any backup, pick a target layout (incl. Location via EXIF GPS),
+   Preview (dry run) first, then Reorganize. Empty folders are removed afterwards.
 
 ## Troubleshooting
 
 - `Could not open session / locked`: unlock iPhone, tap Trust, unplug/replug USB, wait 5s. Kill Apple's Image Capture if it grabbed the device.
 - Empty catalog: wait for "complete content catalog" (large libraries take 10-30s), replug.
 - External drive greyed out in picker: ensure it's mounted in Finder (`/Volumes/...`), format APFS/exFAT, and the app has Files permission (sandbox entitlement above).
+- Location layout shows "Unknown location": those files have no EXIF GPS (or no network for reverse-geocoding).
 - HEIC won't preview on old macOS: files still copy fine; open in Preview/Photos on Ventura+.
 - Download error `-9928` etc.: cable issue — try another cable/port, keep iPhone awake (Settings → Display → Never during backup).
 
 ## Notes / limitations
 
 - USB PTP only exposes the Camera Roll catalog — some custom Photos albums/smart folders aren't visible over USB (iOS limitation).
-- Deletes are not offered (backup-only, safe).
+- Deletes are not offered during import (backup-only, safe); reorganize only deletes folders it emptied.
 - One download at a time (ImageCaptureCore is most reliable serially); byte-level progress isn't exposed, progress is per-file.
+- Video capture dates come from file dates (no EXIF); dupe checks for videos fall back to name + size.
