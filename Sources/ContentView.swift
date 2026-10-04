@@ -43,6 +43,9 @@ struct ContentView: View {
             if reorganizer.isRunning {
                 ReorganizeBlockingOverlay(reorganizer: reorganizer)
             }
+            if importer.isImporting {
+                ImportBlockingOverlay(importer: importer)
+            }
         }
         .onAppear {
             restoreDestination()
@@ -380,5 +383,42 @@ struct PhotoCell: View {
 
     var dateString: String {
         DateFormatter.localizedString(from: item.creationDate, dateStyle: .short, timeStyle: .none)
+    }
+}
+
+/// Full-window modal shown while an import runs — mirrors the reorganize
+/// overlay so both long operations behave the same way.
+struct ImportBlockingOverlay: View {
+    @ObservedObject var importer: ImportManager
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+            VStack(spacing: 12) {
+                Text("Backing up…")
+                    .font(.headline)
+                ProgressView(value: importer.progress) {
+                    Text(importer.currentFileName.isEmpty ? "Starting…" : importer.currentFileName)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Text("\(importer.importedCount) imported · \(importer.skippedCount) skipped · \(importer.failedCount) failed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Stalled transfers are skipped automatically.\nYou can cancel anytime — finished files are kept.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Cancel") { importer.cancel() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(24)
+            .frame(width: 400)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .cornerRadius(12)
+            .shadow(radius: 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
