@@ -21,6 +21,38 @@ final class DownloadDelegateTests: XCTestCase {
     }
 }
 
+final class HelperCLITests: XCTestCase {
+    /// Runs the BUNDLED helper (also proves the copy phase works).
+    private func runHelper(_ args: String...) throws -> Int32 {
+        guard let helper = StorageManager.findHelper() else {
+            throw XCTSkip("helper not bundled")
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = [helper] + args
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        p.waitUntilExit()
+        return p.terminationStatus
+    }
+
+    /// No device needed: argument validation happens before connecting.
+    func testUsageErrorsExit2() throws {
+        XCTAssertEqual(try runHelper(), 2)
+        XCTAssertEqual(try runHelper("bogus"), 2)
+        XCTAssertEqual(try runHelper("wipedata"), 2)
+        XCTAssertEqual(try runHelper("uninstall"), 2)
+    }
+
+    func testWipeResponseDecodes() throws {
+        let json = #"{"id":"com.apple.Maps","freed":123456,"removed":7}"#.data(using: .utf8)!
+        let r = try JSONDecoder().decode(StorageManager.WipeResponse.self, from: json)
+        XCTAssertEqual(r.freed, 123456)
+        XCTAssertEqual(r.removed, 7)
+    }
+}
+
 final class StorageModelTests: XCTestCase {
     func testAppListDecodes() throws {
         let json = """

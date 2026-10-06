@@ -54,8 +54,10 @@ xcodebuild test -project iPhonePhotoBackup.xcodeproj -scheme iPhonePhotoBackup \
 6. **Reorganize folder** (sidebar): point at any backup, pick a target layout (incl. Location via EXIF GPS),
    Preview (dry run) first, then Reorganize. Empty folders are removed afterwards.
 7. **Storage tab**: list installed apps with container sizes (user apps), search, and delete
-   what you don't need (incl. removable Apple apps like Maps). Deletions are permanent;
-   protected system apps fail with a device error.
+   what you don't need (incl. removable Apple apps like Maps), or clear an app's data
+   (offline maps, caches) while keeping it installed. Deletions are permanent;
+   protected system apps fail with a device error. Missing Python package installs
+   with one tap from inside the tab.
 
 ## Troubleshooting
 

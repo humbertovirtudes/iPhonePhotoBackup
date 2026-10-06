@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""iPhone storage helper (USB, via pymobiledevice3). Read-only except `uninstall`.
+"""iPhone storage helper (USB, via pymobiledevice3). Read-only except
+`uninstall` and `wipedata` (both destructive).
 
 Usage:
     iphone_tools.py list                  -> {"apps": [{id,name,type,container,version}]}
     iphone_tools.py size <bundle-id>      -> {"id": .., "bytes": N | null}
     iphone_tools.py uninstall <bundle-id> -> {"id": .., "ok": true}
+    iphone_tools.py wipedata <bundle-id>  -> {"id": .., "freed": N, "removed": M}
 
+wipedata vends the app's Data container and deletes everything inside it
+(offline maps, caches, documents) while keeping the app installed.
 JSON goes to stdout; diagnostics to stderr; nonzero exit on failure.
-System apps usually expose no AFC container, so their size is null.
+System apps usually expose no vendable container (size null, wipe fails).
 """
 import asyncio
 import json
@@ -96,9 +100,37 @@ async def cmd_uninstall(bid):
     print(json.dumps({"id": bid, "ok": True}))
 
 
+async def cmd_wipedata(bid):
+    """Delete everything inside the app's Data container (app stays installed)."""
+    lockdown = create_using_usbmux()
+    if asyncio.iscoroutine(lockdown):
+        lockdown = await lockdown
+    ha = await HouseArrestService.create(lockdown=lockdown, bundle_id=bid)
+    before = walk_size(ha, "/") or 0
+    removed = 0
+    try:
+        top = ha.listdir("/")
+    except Exception as e:
+        print(json.dumps({"id": bid, "freed": 0, "removed": 0, "warning": f"listdir: {e}"}))
+        return
+    if isinstance(top, dict):
+        top = list(top.keys())
+    for name in top:
+        try:
+            r = ha.rm("/" + str(name))
+            if asyncio.iscoroutine(r):
+                await r
+            removed += 1
+        except Exception:
+            continue
+    after = walk_size(ha, "/") or 0
+    print(json.dumps({"id": bid, "freed": max(0, before - after), "removed": removed}))
+
+
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("list", "size", "uninstall"):
-        print("usage: iphone_tools.py [list|size <bid>|uninstall <bid>]", file=sys.stderr)
+    if len(argv) < 2 or argv[1] not in ("list", "size", "uninstall", "wipedata"):
+        print("usage: iphone_tools.py [list|size <bid>|uninstall <bid>|wipedata <bid>]",
+              file=sys.stderr)
         return 2
     try:
         if argv[1] == "list":
@@ -108,6 +140,11 @@ def main(argv):
                 print("usage: iphone_tools.py size <bundle-id>", file=sys.stderr)
                 return 2
             asyncio.run(cmd_size(argv[2]))
+        elif argv[1] == "wipedata":
+            if len(argv) < 3:
+                print("usage: iphone_tools.py wipedata <bundle-id>", file=sys.stderr)
+                return 2
+            asyncio.run(cmd_wipedata(argv[2]))
         else:
             if len(argv) < 3:
                 print("usage: iphone_tools.py uninstall <bundle-id>", file=sys.stderr)

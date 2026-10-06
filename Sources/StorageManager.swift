@@ -60,6 +60,14 @@ final class StorageManager: NSObject, ObservableObject {
     @Published var sizingInFlight = false
     @Published var isLoadingList = false
     @Published var statusMessage = "Connect an iPhone via USB, then Refresh."
+    @Published var pythonReady: Bool?
+    @Published var installingDeps = false
+
+    struct WipeResponse: Decodable {
+        var id: String
+        var freed: Int64
+        var removed: Int
+    }
 
     static let pythonSetupHint = "/usr/bin/python3 -m pip install --user pymobiledevice3"
 
@@ -103,6 +111,65 @@ final class StorageManager: NSObject, ObservableObject {
         let dev = (NSHomeDirectory() as NSString).appendingPathComponent("iPhonePhotoBackup/pmd_helpers/iphone_tools.py")
         if fm.isReadableFile(atPath: dev) { return dev }
         return nil
+    }
+
+    // MARK: - Python dependency (one-click install)
+
+    func checkDependencies() {
+        statusMessage = "Checking Python setup…"
+        DispatchQueue.global(qos: .utility).async {
+            let ok = Self.findPython() != nil
+            DispatchQueue.main.async {
+                self.pythonReady = ok
+                self.statusMessage = ok
+                    ? "Connect an iPhone via USB, then Refresh."
+                    : "Needs the Python package to talk to the iPhone — one tap to install."
+            }
+        }
+    }
+
+    /// `pip install --user pymobiledevice3` with the first working python.
+    func installDependencies() {
+        guard !installingDeps else { return }
+        installingDeps = true
+        statusMessage = "Installing pymobiledevice3 (needs network, ~1 min)…"
+        DispatchQueue.global(qos: .utility).async {
+            var finished = false
+            let done: (Bool) -> Void = { ok in
+                DispatchQueue.main.async {
+                    guard !finished else { return }
+                    finished = true
+                    self.installingDeps = false
+                    if ok {
+                        self.pythonReady = true
+                        self.statusMessage = "Installed — reading apps…"
+                        self.refreshApps { _ in self.loadSizes() }
+                    } else {
+                        self.pythonReady = false
+                        self.statusMessage = "Install failed. Try in Terminal:\n\(Self.pythonSetupHint)"
+                    }
+                }
+            }
+            for py in ["/usr/bin/python3",
+                       "/Applications/Xcode.app/Contents/Developer/usr/bin/python3"]
+                where FileManager.default.isExecutableFile(atPath: py) {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: py)
+                p.arguments = ["-m", "pip", "install", "--user", "pymobiledevice3"]
+                p.standardOutput = FileHandle.nullDevice
+                p.standardError = FileHandle.nullDevice
+                do { try p.run() } catch { continue }
+                let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 600, execute: killer)
+                p.waitUntilExit()
+                killer.cancel()
+                if p.terminationStatus == 0, Self.findPython() != nil {
+                    done(true)
+                    return
+                }
+            }
+            done(false)
+        }
     }
 
     // MARK: - Running the helper
@@ -207,6 +274,24 @@ final class StorageManager: NSObject, ObservableObject {
             }
             group.wait()
             DispatchQueue.main.async { self.sizingInFlight = false }
+        }
+    }
+
+    func wipeData(_ app: StoredApp, completion: @escaping (Result<String, StorageError>) -> Void) {
+        runHelper(["wipedata", app.id], timeout: 240) { result in
+            switch result {
+            case .failure(let e):
+                completion(.failure(e))
+            case .success(let data):
+                if let resp = try? JSONDecoder().decode(WipeResponse.self, from: data) {
+                    completion(.success("Cleared \(Self.sizeString(resp.freed)) in \(resp.removed) item(s) of \(app.name)."))
+                } else if let err = try? JSONDecoder().decode([String: String].self, from: data),
+                          let msg = err["error"] {
+                    completion(.failure(.failed(exit: -1, message: msg)))
+                } else {
+                    completion(.failure(.failed(exit: -1, message: "Unexpected response")))
+                }
+            }
         }
     }
 

@@ -2,6 +2,7 @@
 // delete what you don't need (e.g. Maps). Deletions are permanent.
 
 import SwiftUI
+import AppKit
 
 struct StorageView: View {
     @ObservedObject var storage: StorageManager
@@ -9,6 +10,7 @@ struct StorageView: View {
     @State private var search = ""
     @State private var showSystemApps = false
     @State private var pendingDelete: StoredApp?
+    @State private var pendingWipe: StoredApp?
     @State private var resultMessage: String?
     @State private var showResult = false
     @State private var deletingID: String?
@@ -45,6 +47,24 @@ struct StorageView: View {
                     storage.refreshApps { _ in storage.loadSizes() }
                 }
                 .disabled(storage.isLoadingList)
+            }
+
+            if storage.pythonReady == false {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                    Text("Python package missing — needed to talk to the iPhone.")
+                        .font(.caption)
+                    Spacer()
+                    if storage.installingDeps { ProgressView().scaleEffect(0.7) }
+                    Button(storage.installingDeps ? "Installing…" : "Install") {
+                        storage.installDependencies()
+                    }
+                    .disabled(storage.installingDeps)
+                }
+                .padding(8)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(8)
             }
 
             HStack {
@@ -105,6 +125,15 @@ struct StorageView: View {
                                 .foregroundStyle(.tertiary)
                         }
                         Button {
+                            pendingWipe = app
+                        } label: {
+                            Image(systemName: "eraser")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.orange)
+                        .disabled(deletingID != nil)
+                        .help("Clear \(app.name)'s data (offline files, caches) — keeps the app installed")
+                        Button {
                             pendingDelete = app
                         } label: {
                             Image(systemName: "trash")
@@ -120,9 +149,33 @@ struct StorageView: View {
         }
         .padding(12)
         .task {
-            if storage.apps.isEmpty {
+            storage.checkDependencies()
+        }
+        .onChange(of: storage.pythonReady) { ready in
+            if ready == true, storage.apps.isEmpty {
                 storage.refreshApps { _ in storage.loadSizes() }
             }
+        }
+        .alert(item: $pendingWipe) { app in
+            Alert(
+                title: Text("Clear \(app.name)'s data?"),
+                message: Text("Deletes everything inside \(app.name)'s data container (offline maps, downloads, caches) but keeps the app installed. This cannot be undone."),
+                primaryButton: .destructive(Text("Clear data")) {
+                    deletingID = app.id
+                    storage.wipeData(app) { result in
+                        deletingID = nil
+                        switch result {
+                        case .success(let msg):
+                            resultMessage = msg
+                        case .failure(let e):
+                            resultMessage = "Could not clear \(app.name)'s data: \(e.localizedDescription)"
+                        }
+                        showResult = true
+                        storage.refreshApps { _ in storage.loadSizes() }
+                    }
+                },
+                secondaryButton: .cancel()
+            )
         }
         .alert(item: $pendingDelete) { app in
             Alert(
