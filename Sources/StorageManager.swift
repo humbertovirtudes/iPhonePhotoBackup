@@ -223,6 +223,15 @@ final class StorageManager: NSObject, ObservableObject {
             }
             process.waitUntilExit()
             if process.terminationStatus != 0 {
+                let outData = out.fileHandleForReading.readDataToEndOfFile()
+                // Prefer the helper's own {"error": ...} on stdout: the last
+                // stderr line is often just asyncio teardown noise
+                // ("Event loop is closed") hiding the real cause.
+                if let json = try? JSONSerialization.jsonObject(with: outData) as? [String: String],
+                   let msg = json["error"] {
+                    finish(.failure(.failed(exit: process.terminationStatus, message: msg)))
+                    return
+                }
                 let errText = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
                 let lastLine = errText.split(separator: "\n").last.map(String.init) ?? "unknown error"
                 finish(.failure(.failed(exit: process.terminationStatus, message: lastLine)))

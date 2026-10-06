@@ -168,7 +168,10 @@ def main(argv):
             asyncio.run(cmd_uninstall(argv[2]))
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
-        print(json.dumps({"error": f"{type(e).__name__}: {e}"}))
+        msg = f"{type(e).__name__}: {e}"
+        if "LookupFailed" in msg:
+            msg += " (usually: iPhone is locked — unlock it and retry)"
+        print(json.dumps({"error": msg}))
         return 1
     return 0
 
