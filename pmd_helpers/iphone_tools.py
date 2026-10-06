@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """iPhone storage helper (USB, via pymobiledevice3). Read-only except
-`uninstall` and `wipedata` (both destructive).
+`uninstall` (destructive).
 
 Usage:
     iphone_tools.py list                  -> {"apps": [{id,name,type,container,version}]}
-    iphone_tools.py size <bundle-id>      -> {"id": .., "bytes": N | null}
+    iphone_tools.py size <bundle-id>      -> {"id": .., "bytes": N | null,
+                                              "parts": [{path,size}]}
     iphone_tools.py uninstall <bundle-id> -> {"id": .., "ok": true}
-    iphone_tools.py wipedata <bundle-id>  -> {"id": .., "freed": N, "removed": M}
 
-wipedata vends the app's Data container and deletes everything inside it
-(offline maps, caches, documents) while keeping the app installed.
-JSON goes to stdout; diagnostics to stderr; nonzero exit on failure.
-System apps usually expose no vendable container (size null, wipe fails).
+Sizes come from installation_proxy disk-usage keys (no container access
+needed, works while locked). JSON to stdout; nonzero exit on failure.
 """
 import asyncio
 import json
@@ -20,7 +18,6 @@ import traceback
 
 from pymobiledevice3.lockdown import create_using_usbmux
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
-from pymobiledevice3.services.house_arrest import HouseArrestService
 
 
 async def get_apps():
@@ -51,58 +48,31 @@ def cmd_list():
     print(json.dumps({"apps": apps}))
 
 
-def walk_parts(afc, root):
-    """(total bytes, {top-level dir: bytes}) under root; (None, {}) on failure."""
-    total = 0
-    parts = {}
-    try:
-        walker = afc.walk(root)
-    except Exception:
-        return None, {}
-    try:
-        for dirpath, _dirnames, filenames in walker:
-            for fn in filenames:
-                try:
-                    st = afc.stat(dirpath.rstrip("/") + "/" + fn)
-                    sz = int(getattr(st, "st_size", 0) or 0)
-                except Exception:
-                    continue
-                total += sz
-                rel = dirpath[len(root):].strip("/")
-                first = rel.split("/")[0] if rel else "(top level)"
-                parts[first] = parts.get(first, 0) + sz
-    except Exception:
-        return None, {}
-    return total, parts
-
-
-def walk_size(afc, root):
-    total, _ = walk_parts(afc, root)
-    return total
-
-
 async def cmd_size(bid):
+    # Per-app sizes straight from installation_proxy — no container access
+    # needed (house_arrest refuses most apps), works even while locked.
     lockdown = create_using_usbmux()
     if asyncio.iscoroutine(lockdown):
         lockdown = await lockdown
-    raw = await InstallationProxyService(lockdown).get_apps()
+    raw = await InstallationProxyService(lockdown).lookup(
+        {"BundleIDs": [bid], "ReturnAttributes": ["StaticDiskUsage", "DynamicDiskUsage"]})
     meta = raw.get(bid, {}) if isinstance(raw, dict) else {}
-    container = meta.get("Container")
-    if not container:
-        print(json.dumps({"id": bid, "bytes": None}))
-        return
-    # App Data containers are only reachable via house_arrest (per-app AFC).
-    # This fails for most System apps (no vendable container) -> size null.
-    try:
-        ha = await HouseArrestService.create(lockdown=lockdown, bundle_id=bid)
-    except Exception as e:
-        print(json.dumps({"id": bid, "bytes": None, "warning": f"house_arrest: {e}"}))
-        return
-    total, parts = walk_parts(ha, "/")
+
+    def num(v):
+        return int(v) if isinstance(v, (int, float)) else None
+
+    static = num(meta.get("StaticDiskUsage"))
+    dynamic = num(meta.get("DynamicDiskUsage"))
+    parts = []
+    if static is not None:
+        parts.append({"path": "App", "bytes": static})
+    if dynamic is not None:
+        parts.append({"path": "Data", "bytes": dynamic})
+    total = (static or 0) + (dynamic or 0)
     print(json.dumps({
         "id": bid,
-        "bytes": total,
-        "parts": [{"path": k, "bytes": v} for k, v in sorted(parts.items(), key=lambda kv: -kv[1])],
+        "bytes": total if (static is not None or dynamic is not None) else None,
+        "parts": parts,
     }))
 
 
@@ -116,36 +86,9 @@ async def cmd_uninstall(bid):
     print(json.dumps({"id": bid, "ok": True}))
 
 
-async def cmd_wipedata(bid):
-    """Delete everything inside the app's Data container (app stays installed)."""
-    lockdown = create_using_usbmux()
-    if asyncio.iscoroutine(lockdown):
-        lockdown = await lockdown
-    ha = await HouseArrestService.create(lockdown=lockdown, bundle_id=bid)
-    before = walk_size(ha, "/") or 0
-    removed = 0
-    try:
-        top = ha.listdir("/")
-    except Exception as e:
-        print(json.dumps({"id": bid, "freed": 0, "removed": 0, "warning": f"listdir: {e}"}))
-        return
-    if isinstance(top, dict):
-        top = list(top.keys())
-    for name in top:
-        try:
-            r = ha.rm("/" + str(name))
-            if asyncio.iscoroutine(r):
-                await r
-            removed += 1
-        except Exception:
-            continue
-    after = walk_size(ha, "/") or 0
-    print(json.dumps({"id": bid, "freed": max(0, before - after), "removed": removed}))
-
-
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("list", "size", "uninstall", "wipedata"):
-        print("usage: iphone_tools.py [list|size <bid>|uninstall <bid>|wipedata <bid>]",
+    if len(argv) < 2 or argv[1] not in ("list", "size", "uninstall"):
+        print("usage: iphone_tools.py [list|size <bid>|uninstall <bid>]",
               file=sys.stderr)
         return 2
     try:
@@ -156,11 +99,6 @@ def main(argv):
                 print("usage: iphone_tools.py size <bundle-id>", file=sys.stderr)
                 return 2
             asyncio.run(cmd_size(argv[2]))
-        elif argv[1] == "wipedata":
-            if len(argv) < 3:
-                print("usage: iphone_tools.py wipedata <bundle-id>", file=sys.stderr)
-                return 2
-            asyncio.run(cmd_wipedata(argv[2]))
         else:
             if len(argv) < 3:
                 print("usage: iphone_tools.py uninstall <bundle-id>", file=sys.stderr)

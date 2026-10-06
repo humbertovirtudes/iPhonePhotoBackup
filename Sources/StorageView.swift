@@ -7,22 +7,9 @@ import AppKit
 struct StorageView: View {
     @ObservedObject var storage: StorageManager
 
-    /// Single alert source (two `.alert(item:)` on one view conflict —
-    /// only the last one ever presents).
-    enum PendingAction: Identifiable {
-        case wipe(StoredApp)
-        case delete(StoredApp)
-        var id: String {
-            switch self {
-            case .wipe(let a): return "wipe-\(a.id)"
-            case .delete(let a): return "delete-\(a.id)"
-            }
-        }
-    }
-
     @State private var search = ""
     @State private var showSystemApps = false
-    @State private var pendingAction: PendingAction?
+    @State private var pendingDelete: StoredApp?
     @State private var resultMessage: String?
     @State private var showResult = false
     @State private var deletingID: String?
@@ -161,19 +148,10 @@ struct StorageView: View {
                                     .help("No size: container not accessible (unlock iPhone) or system app")
                             }
                         Button {
-                            pendingAction = .wipe(app)
+                            pendingDelete = app
                         } label: {
-                                Image(systemName: "eraser")
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.orange)
-                            .disabled(deletingID != nil)
-                            .help("Clear \(app.name)'s data (offline files, caches) — keeps the app installed")
-                        Button {
-                            pendingAction = .delete(app)
-                        } label: {
-                                Image(systemName: "trash")
-                            }
+                            Image(systemName: "trash")
+                        }
                             .buttonStyle(.borderless)
                             .foregroundStyle(.red)
                             .disabled(deletingID != nil)
@@ -193,49 +171,26 @@ struct StorageView: View {
                 storage.refreshApps { _ in storage.loadSizes() }
             }
         }
-        .alert(item: $pendingAction) { action in
-            switch action {
-            case .wipe(let app):
-                Alert(
-                    title: Text("Clear \(app.name)'s data?"),
-                    message: Text("Deletes everything inside \(app.name)'s data container (offline maps, downloads, caches) but keeps the app installed. This cannot be undone."),
-                    primaryButton: .destructive(Text("Clear data")) {
-                        deletingID = app.id
-                        storage.wipeData(app) { result in
-                            deletingID = nil
-                            switch result {
-                            case .success(let msg):
-                                resultMessage = msg
-                            case .failure(let e):
-                                resultMessage = "Could not clear \(app.name)'s data: \(e.localizedDescription)"
-                            }
-                            showResult = true
-                            storage.refreshApps { _ in storage.loadSizes() }
+        .alert(item: $pendingDelete) { app in
+            Alert(
+                title: Text("Delete \(app.name)?"),
+                message: Text("This permanently removes \(app.name) (\(app.id)) and its data from the iPhone. System apps iOS protects will fail with a device error."),
+                primaryButton: .destructive(Text("Delete")) {
+                    deletingID = app.id
+                    storage.uninstall(app) { result in
+                        deletingID = nil
+                        switch result {
+                        case .success(let msg):
+                            resultMessage = msg
+                        case .failure(let e):
+                            resultMessage = "Could not delete \(app.name): \(e.localizedDescription)"
                         }
-                    },
-                    secondaryButton: .cancel()
-                )
-            case .delete(let app):
-                Alert(
-                    title: Text("Delete \(app.name)?"),
-                    message: Text("This permanently removes \(app.name) (\(app.id)) and its data from the iPhone. System apps iOS protects will fail with a device error."),
-                    primaryButton: .destructive(Text("Delete")) {
-                        deletingID = app.id
-                        storage.uninstall(app) { result in
-                            deletingID = nil
-                            switch result {
-                            case .success(let msg):
-                                resultMessage = msg
-                            case .failure(let e):
-                                resultMessage = "Could not delete \(app.name): \(e.localizedDescription)"
-                            }
-                            showResult = true
-                            storage.refreshApps { _ in storage.loadSizes() }
-                        }
-                    },
-                    secondaryButton: .cancel()
-                )
-            }
+                        showResult = true
+                        storage.refreshApps { _ in storage.loadSizes() }
+                    }
+                },
+                secondaryButton: .cancel()
+            )
         }
         .alert("Storage", isPresented: $showResult) {
             Button("OK") {}

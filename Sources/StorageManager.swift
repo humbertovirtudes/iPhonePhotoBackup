@@ -72,12 +72,6 @@ final class StorageManager: NSObject, ObservableObject {
     @Published var pythonReady: Bool?
     @Published var installingDeps = false
 
-    struct WipeResponse: Decodable {
-        var id: String
-        var freed: Int64
-        var removed: Int
-    }
-
     static let pythonSetupHint = "/usr/bin/python3 -m pip install --user pymobiledevice3"
 
     static func sizeString(_ bytes: Int64?) -> String {
@@ -309,24 +303,6 @@ final class StorageManager: NSObject, ObservableObject {
                 self.sizingInFlight = false
                 if failed > targets.count / 2, !targets.isEmpty {
                     self.statusMessage = "Could not measure most apps — unlock the iPhone and hit Refresh."
-                }
-            }
-        }
-    }
-
-    func wipeData(_ app: StoredApp, completion: @escaping (Result<String, StorageError>) -> Void) {
-        runHelper(["wipedata", app.id], timeout: 240) { result in
-            switch result {
-            case .failure(let e):
-                completion(.failure(e))
-            case .success(let data):
-                if let resp = try? JSONDecoder().decode(WipeResponse.self, from: data) {
-                    completion(.success("Cleared \(Self.sizeString(resp.freed)) in \(resp.removed) item(s) of \(app.name)."))
-                } else if let err = try? JSONDecoder().decode([String: String].self, from: data),
-                          let msg = err["error"] {
-                    completion(.failure(.failed(exit: -1, message: msg)))
-                } else {
-                    completion(.failure(.failed(exit: -1, message: "Unexpected response")))
                 }
             }
         }

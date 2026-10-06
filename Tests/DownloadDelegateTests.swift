@@ -45,13 +45,6 @@ final class HelperCLITests: XCTestCase {
         XCTAssertEqual(try runHelper("uninstall"), 2)
     }
 
-    func testWipeResponseDecodes() throws {
-        let json = #"{"id":"com.apple.Maps","freed":123456,"removed":7}"#.data(using: .utf8)!
-        let r = try JSONDecoder().decode(StorageManager.WipeResponse.self, from: json)
-        XCTAssertEqual(r.freed, 123456)
-        XCTAssertEqual(r.removed, 7)
-    }
-
     func testSizeResponseWithPartsDecodes() throws {
         let json = #"{"id":"x","bytes":300,"parts":[{"path":"Documents","bytes":200},{"path":"Library","bytes":100}]}"#.data(using: .utf8)!
         let r = try JSONDecoder().decode(AppSizeResponse.self, from: json)
