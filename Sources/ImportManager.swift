@@ -99,7 +99,7 @@ final class ImportManager: NSObject, ObservableObject {
         downloadNext()
     }
 
-    func importItems(_ items: [PhotoItem], to root: URL, scheme: OrganizationScheme = .yearMonth) {
+    func importItems(_ items: [PhotoItem], to root: URL, scheme: OrganizationScheme = .photosVideos) {
         guard !isImporting else { return }
         guard !items.isEmpty else {
             log("Nothing to import.")
@@ -146,7 +146,7 @@ final class ImportManager: NSObject, ObservableObject {
             self.retriedCurrent = false
             self.stopTransferTimers()
 
-            // Resolve final destination (Year/Month by default).
+            // Resolve final destination (Photos/Videos by default).
             var dest = BackupOrganizer.destinationURL(for: item, root: root, scheme: self.scheme, isVideo: item.isVideo)
 
             // Skip exact duplicates (same name + same byte size).

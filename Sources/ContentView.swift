@@ -15,7 +15,7 @@ struct ContentView: View {
     @State private var selection = Set<String>()
     @State private var search = ""
     @State private var showVideosOnly = false
-    @State private var importScheme: OrganizationScheme = .yearMonth
+    @State private var importScheme: OrganizationScheme = .photosVideos
     @State private var newCount: Int?
 
     var filtered: [PhotoItem] {

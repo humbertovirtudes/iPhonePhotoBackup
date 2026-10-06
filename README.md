@@ -4,8 +4,8 @@ Native SwiftUI macOS app that imports photos/videos from an iPhone connected via
 to any folder on this Mac, including an external hard drive.
 
 - Direct USB via Apple's **ImageCaptureCore** (`ICDeviceBrowser` / `ICCameraDevice`) — same tech as Image Capture.
-- Organization: `<backup-root>/YYYY/MM/<original-filename>` by default (e.g. `Backup/2026/10/IMG_1234.HEIC`),
-  with Year, Year/Month-Day and Photos/Videos layouts available per import.
+- Organization: `<backup-root>/Photos|Videos/<original-filename>` by default (e.g. `Backup/Photos/IMG_1234.HEIC`),
+  with Year, Year/Month and Year/Month-Day layouts available per import.
 - Modes: pick individual photos (thumbnails + search) **or** one-click **Import all new (N)** with a live count.
 - Duplicates: matched by filename + byte size + capture date (EXIF-verified for photos when readable);
   genuine collisions keep both via `_1`, `_2` suffixes.

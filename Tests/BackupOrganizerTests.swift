@@ -66,15 +66,21 @@ final class BackupOrganizerTests: XCTestCase {
 
     // MARK: - destinationURL (default: year/month)
 
-    func testDestinationUsesYearMonthFoldersAndKeepsFilename() {
+    func testDefaultSchemeIsPhotosVideos() {
         let item = Fixture(name: "IMG_1234.HEIC", fileSize: 1_000, creationDate: fixtureDate(2026, 10, 4))
         let dest = BackupOrganizer.destinationURL(for: item, root: root)
+        XCTAssertEqual(dest.path, root.appendingPathComponent("Photos/IMG_1234.HEIC").path)
+    }
+
+    func testDestinationUsesYearMonthFoldersAndKeepsFilename() {
+        let item = Fixture(name: "IMG_1234.HEIC", fileSize: 1_000, creationDate: fixtureDate(2026, 10, 4))
+        let dest = BackupOrganizer.destinationURL(for: item, root: root, scheme: .yearMonth)
         XCTAssertEqual(dest.path, root.appendingPathComponent("2026/10/IMG_1234.HEIC").path)
     }
 
     func testDestinationZeroPadsMonth() {
         let item = Fixture(name: "P.mov", fileSize: 1, creationDate: fixtureDate(2025, 3, 7))
-        let dest = BackupOrganizer.destinationURL(for: item, root: root)
+        let dest = BackupOrganizer.destinationURL(for: item, root: root, scheme: .yearMonth)
         XCTAssertTrue(dest.path.hasSuffix("2025/03/P.mov"), dest.path)
     }
 
@@ -181,7 +187,7 @@ final class BackupOrganizerTests: XCTestCase {
 
     func testNewItemCount() throws {
         let old = Fixture(name: "H.HEIC", fileSize: 30, creationDate: fixtureDate(2026, 10, 1))
-        let dest = BackupOrganizer.destinationURL(for: old, root: root)
+        let dest = BackupOrganizer.destinationURL(for: old, root: root, scheme: .yearMonth)
         try writeBytes(dest, bytes: 30) // already backed up (no EXIF → size fallback)
         let fresh = Fixture(name: "I.HEIC", fileSize: 40, creationDate: fixtureDate(2026, 10, 2))
         XCTAssertEqual(BackupOrganizer.newItemCount([old, fresh], root: root, scheme: .yearMonth), 1)

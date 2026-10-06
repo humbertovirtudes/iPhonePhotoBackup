@@ -204,7 +204,7 @@ enum DuplicateChecker {
 /// Destination layout + dedupe helpers.
 enum BackupOrganizer {
     static func destinationURL(for item: any BackupSource, root: URL) -> URL {
-        destinationURL(for: item, root: root, scheme: .yearMonth, placeName: nil, isVideo: nil)
+        destinationURL(for: item, root: root, scheme: .photosVideos, placeName: nil, isVideo: nil)
     }
 
     static func destinationURL(for item: any BackupSource, root: URL,
