@@ -64,6 +64,8 @@ final class StorageManager: NSObject, ObservableObject {
     @Published var apps: [StoredApp] = []
     @Published var sizes: [String: Int64] = [:]
     @Published var sizeParts: [String: [AppPart]] = [:]
+    /// Why a size couldn't be measured (e.g. locked iPhone) — shown in the row.
+    @Published var sizeWarnings: [String: String] = [:]
     @Published var sizingInFlight = false
     @Published var isLoadingList = false
     @Published var statusMessage = "Connect an iPhone via USB, then Refresh."
@@ -246,6 +248,9 @@ final class StorageManager: NSObject, ObservableObject {
                 do {
                     let list = try JSONDecoder().decode(AppListResponse.self, from: data)
                     self.apps = list.apps
+                    self.sizes = [:]
+                    self.sizeParts = [:]
+                    self.sizeWarnings = [:]
                     let users = list.apps.filter(\.isUserApp).count
                     self.statusMessage = "\(list.apps.count) apps (\(users) user-installed)."
                     completion?(.success(list.apps.count))
@@ -276,10 +281,13 @@ final class StorageManager: NSObject, ObservableObject {
                     defer { sema.signal(); group.leave() }
                     guard let self else { return }
                     if case .success(let data) = result,
-                       let resp = try? JSONDecoder().decode(AppSizeResponse.self, from: data),
-                       let bytes = resp.bytes {
-                        self.sizes[app.id] = bytes
-                        if let parts = resp.parts { self.sizeParts[app.id] = parts }
+                       let resp = try? JSONDecoder().decode(AppSizeResponse.self, from: data) {
+                        if let bytes = resp.bytes {
+                            self.sizes[app.id] = bytes
+                            if let parts = resp.parts { self.sizeParts[app.id] = parts }
+                        } else {
+                            self.sizeWarnings[app.id] = resp.warning ?? "Container not accessible — unlock the iPhone and Refresh."
+                        }
                     } else {
                         failedLock.lock()
                         failed += 1
