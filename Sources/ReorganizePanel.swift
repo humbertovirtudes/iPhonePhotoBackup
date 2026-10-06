@@ -12,7 +12,7 @@ struct ReorganizePanel: View {
     @ObservedObject var reorganizer: Reorganizer
     var root: URL?
 
-    @State private var scheme: OrganizationScheme = .yearMonth
+    @State private var scheme: OrganizationScheme = .photosVideos
     @State private var dryRun = true
 
     var body: some View {

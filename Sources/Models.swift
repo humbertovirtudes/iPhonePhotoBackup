@@ -15,8 +15,9 @@ protocol BackupSource {
 
 /// How backed-up files are laid out under the backup root.
 enum OrganizationScheme: String, CaseIterable, Identifiable {
+    case photosVideos  // <root>/Photos|Videos/<file> (reorganize default)
     case year          // <root>/2026/<file>
-    case yearMonth     // <root>/2026/10/<file>  (default)
+    case yearMonth     // <root>/2026/10/<file>  (import default)
     case yearMonthDay  // <root>/2026/10-04/<file> (legacy layout)
     case mediaType     // <root>/Photos|Videos/2026/10/<file>
     case location      // <root>/<Place>/2026/10/<file>
@@ -26,21 +27,23 @@ enum OrganizationScheme: String, CaseIterable, Identifiable {
     /// Schemes offered for USB import (fast, offline — no network lookups).
     /// Location grouping lives in the Reorganize tool instead.
     static var importCases: [OrganizationScheme] {
-        [.year, .yearMonth, .yearMonthDay, .mediaType]
+        [.year, .yearMonth, .yearMonthDay, .photosVideos, .mediaType]
     }
 
     var title: String {
         switch self {
+        case .photosVideos: return "Photos / Videos"
         case .year: return "Year"
         case .yearMonth: return "Year / Month"
         case .yearMonthDay: return "Year / Month-Day"
-        case .mediaType: return "Photos / Videos"
+        case .mediaType: return "Photos / Videos + Date"
         case .location: return "Location"
         }
     }
 
     var example: String {
         switch self {
+        case .photosVideos: return "Backup/Photos/IMG_1.HEIC"
         case .year: return "Backup/2026/IMG_1.HEIC"
         case .yearMonth: return "Backup/2026/10/IMG_1.HEIC"
         case .yearMonthDay: return "Backup/2026/10-04/IMG_1.HEIC"
@@ -212,6 +215,9 @@ enum BackupOrganizer {
         let year = String(format: "%04d", comps.year ?? 1970)
         var url = root
         switch scheme {
+        case .photosVideos:
+            let video = isVideo ?? MediaType.isVideo(uti: "", fileName: item.name)
+            url.appendPathComponent(video ? "Videos" : "Photos", isDirectory: true)
         case .year:
             url.appendPathComponent(year, isDirectory: true)
         case .yearMonth:

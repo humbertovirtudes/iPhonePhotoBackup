@@ -84,6 +84,13 @@ final class BackupOrganizerTests: XCTestCase {
         XCTAssertTrue(dest.path.hasSuffix("2024/A.JPG"), dest.path)
     }
 
+    func testPhotosVideosSchemeHasNoDateFolders() {
+        let photo = Fixture(name: "A.HEIC", fileSize: 1, creationDate: fixtureDate(2026, 10, 4))
+        let video = Fixture(name: "B.MOV", fileSize: 1, creationDate: fixtureDate(2026, 10, 4))
+        XCTAssertTrue(BackupOrganizer.destinationURL(for: photo, root: root, scheme: .photosVideos).path.hasSuffix("Photos/A.HEIC"))
+        XCTAssertTrue(BackupOrganizer.destinationURL(for: video, root: root, scheme: .photosVideos).path.hasSuffix("Videos/B.MOV"))
+    }
+
     func testYearMonthDaySchemeIsLegacyLayout() {
         let item = Fixture(name: "A.JPG", fileSize: 1, creationDate: fixtureDate(2026, 10, 4))
         let dest = BackupOrganizer.destinationURL(for: item, root: root, scheme: .yearMonthDay)
