@@ -58,6 +58,13 @@ final class HelperCLITests: XCTestCase {
         XCTAssertEqual(r.sizes["a"]?.bytes, 10)
         XCTAssertNil(r.sizes["b"]?.bytes)
     }
+
+    func testDiskResponseDecodes() throws {
+        let json = #"{"total":255414849536,"free":487043072}"#.data(using: .utf8)!
+        let r = try JSONDecoder().decode(DiskResponse.self, from: json)
+        XCTAssertEqual(r.free, 487043072)
+        XCTAssertEqual(r.total, 255414849536)
+    }
 }
 
 final class StorageModelTests: XCTestCase {

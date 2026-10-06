@@ -9,6 +9,7 @@ Usage:
     iphone_tools.py sizes <bid>...        -> {"sizes": {bid: {"bytes": N|null,
                                               "parts": [...]}}} (one Lookup)
     iphone_tools.py uninstall <bundle-id> -> {"id": .., "ok": true}
+    iphone_tools.py disk                  -> {"total": N, "free": N} (device storage)
 
 Sizes come from installation_proxy disk-usage keys (no container access
 needed, works while locked). JSON to stdout; nonzero exit on failure.
@@ -20,6 +21,7 @@ import traceback
 
 from pymobiledevice3.lockdown import create_using_usbmux
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
+from pymobiledevice3.services.afc import AfcService
 
 
 async def get_apps():
@@ -104,9 +106,28 @@ async def cmd_uninstall(bid):
     print(json.dumps({"id": bid, "ok": True}))
 
 
+async def cmd_disk():
+    lockdown = create_using_usbmux()
+    if asyncio.iscoroutine(lockdown):
+        lockdown = await lockdown
+    afc = AfcService(lockdown)
+    r = afc.connect()
+    if asyncio.iscoroutine(r):
+        await r
+    info = afc.get_device_info()
+    if asyncio.iscoroutine(info):
+        info = await info
+    info = info or {}
+
+    def num(v):
+        return int(v) if isinstance(v, (int, float)) else None
+
+    print(json.dumps({"total": num(info.get("FSTotalBytes")), "free": num(info.get("FSFreeBytes"))}))
+
+
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("list", "size", "sizes", "uninstall"):
-        print("usage: iphone_tools.py [list|size <bid>|sizes <bid>...|uninstall <bid>]",
+    if len(argv) < 2 or argv[1] not in ("list", "size", "sizes", "uninstall", "disk"):
+        print("usage: iphone_tools.py [list|size <bid>|sizes <bid>...|uninstall <bid>|disk]",
               file=sys.stderr)
         return 2
     try:
@@ -122,6 +143,8 @@ def main(argv):
                 print("usage: iphone_tools.py sizes <bid>...", file=sys.stderr)
                 return 2
             asyncio.run(cmd_sizes(argv[2:]))
+        elif argv[1] == "disk":
+            asyncio.run(cmd_disk())
         else:
             if len(argv) < 3:
                 print("usage: iphone_tools.py uninstall <bundle-id>", file=sys.stderr)

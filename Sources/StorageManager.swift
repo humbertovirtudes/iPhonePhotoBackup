@@ -44,6 +44,11 @@ struct AppSizesResponse: Decodable {
     var sizes: [String: AppSizeEntry]
 }
 
+struct DiskResponse: Decodable {
+    var total: Int64?
+    var free: Int64?
+}
+
 struct AppSizeEntry: Decodable {
     var bytes: Int64?
     var parts: [AppPart]?
@@ -76,6 +81,8 @@ final class StorageManager: NSObject, ObservableObject {
     @Published var sizeWarnings: [String: String] = [:]
     @Published var sizingInFlight = false
     @Published var isLoadingList = false
+    @Published var diskTotal: Int64?
+    @Published var diskFree: Int64?
     @Published var statusMessage = "Connect an iPhone via USB, then Refresh."
     @Published var pythonReady: Bool?
     @Published var installingDeps = false
@@ -248,6 +255,7 @@ final class StorageManager: NSObject, ObservableObject {
     func refreshApps(completion: ((Result<Int, StorageError>) -> Void)? = nil) {
         isLoadingList = true
         statusMessage = "Reading installed apps…"
+        refreshDisk()
         runHelper(["list"], timeout: 90) { [weak self] result in
             guard let self else { return }
             self.isLoadingList = false
@@ -269,6 +277,18 @@ final class StorageManager: NSObject, ObservableObject {
                     self.statusMessage = "Could not parse app list: \(error.localizedDescription)"
                     completion?(.failure(.failed(exit: -1, message: error.localizedDescription)))
                 }
+            }
+        }
+    }
+
+    /// Device free/total storage (fast AFC call, works while locked).
+    func refreshDisk() {
+        runHelper(["disk"], timeout: 60) { [weak self] result in
+            guard let self else { return }
+            if case .success(let data) = result,
+               let resp = try? JSONDecoder().decode(DiskResponse.self, from: data) {
+                self.diskTotal = resp.total
+                self.diskFree = resp.free
             }
         }
     }

@@ -73,6 +73,19 @@ struct StorageView: View {
                 .disabled(storage.isLoadingList)
             }
 
+            if let free = storage.diskFree, let total = storage.diskTotal {
+                HStack(spacing: 4) {
+                    Text("iPhone free: \(StorageManager.sizeString(free)) of \(StorageManager.sizeString(total))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if free < 2_000_000_000 {
+                        Label("critically low — free space before updating iOS or backing up", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
             if storage.pythonReady == false {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle")
