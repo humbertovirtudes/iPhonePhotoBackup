@@ -18,6 +18,9 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     private let browser = ICDeviceBrowser()
+    /// Guards against concurrent requestOpenSession calls for one device —
+    /// a duplicate request errors out and must not kill the catalog.
+    private var openingSession = false
 
     override init() {
         super.init()
@@ -39,6 +42,18 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    /// Re-discovers USB cameras and re-opens the session/catalog.
+    /// Use when reconnecting a phone shows nothing.
+    func rescan() {
+        statusMessage = "Rescanning for USB cameras…"
+        openingSession = false
+        browser.stop()
+        browser.start()
+        // Re-run the open/catalog flow for whatever is selected; newly
+        // discovered devices arrive via deviceBrowser(didAdd:) below.
+        reloadCatalog()
+    }
+
     // MARK: - Catalog
 
     private func reloadCatalog() {
@@ -52,6 +67,8 @@ final class CameraManager: NSObject, ObservableObject {
             return
         }
         if !device.hasOpenSession {
+            guard !openingSession else { return } // open already in flight
+            openingSession = true
             isLoadingCatalog = true
             statusMessage = "Opening session with \(device.name ?? "iPhone")…"
             device.requestOpenSession()
@@ -125,7 +142,9 @@ extension CameraManager: ICDeviceBrowserDelegate {
                 self.devices.append(camera)
             }
             if self.selectedDevice == nil {
-                self.selectedDevice = camera
+                self.selectedDevice = camera // didSet → reloadCatalog
+            } else {
+                self.reloadCatalog() // e.g. rescan re-delivery: refresh
             }
             self.statusMessage = "Found \(camera.name ?? "camera") – opening…"
         }
@@ -135,11 +154,9 @@ extension CameraManager: ICDeviceBrowserDelegate {
             }
             return
         }
-        if !camera.hasOpenSession {
-            camera.requestOpenSession()
-        } else {
-            buildItems(from: camera)
-        }
+        // Session opening + catalog build are owned by reloadCatalog
+        // (triggered by the selection below) — requesting here too would
+        // fire a duplicate open whose error kills the catalog.
     }
 
     func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
@@ -163,12 +180,17 @@ extension CameraManager: ICCameraDeviceDelegate {
     // MARK: ICDeviceDelegate @required
 
     func device(_ device: ICDevice, didOpenSessionWithError error: Error?) {
+        DispatchQueue.main.async { self.openingSession = false }
         if let error {
-            DispatchQueue.main.async {
-                self.isLoadingCatalog = false
-                self.statusMessage = "Could not open iPhone session: \(error.localizedDescription). Unlock + Trust, then replug USB."
+            // A duplicate open request can error while the session is
+            // actually fine — only give up when there is truly no session.
+            guard let camera = device as? ICCameraDevice, camera.hasOpenSession else {
+                DispatchQueue.main.async {
+                    self.isLoadingCatalog = false
+                    self.statusMessage = "Could not open iPhone session: \(error.localizedDescription). Unlock + Trust, then replug USB or hit Rescan."
+                }
+                return
             }
-            return
         }
         guard let camera = device as? ICCameraDevice else { return }
         if camera === selectedDevice || selectedDevice == nil {
@@ -180,6 +202,7 @@ extension CameraManager: ICCameraDeviceDelegate {
 
     func device(_ device: ICDevice, didCloseSessionWithError error: Error?) {
         DispatchQueue.main.async {
+            self.openingSession = false
             self.statusMessage = "Session closed."
             self.isLoadingCatalog = false
         }

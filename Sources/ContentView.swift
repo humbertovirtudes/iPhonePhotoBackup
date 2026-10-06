@@ -87,6 +87,9 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: 260)
 
+                Button("Rescan") { camera.rescan() }
+                    .help("Re-discover USB cameras and reload photos (use after reconnecting)")
+
                 // Destination picker (works with internal + external drives)
                 Button {
                     chooseDestination()
