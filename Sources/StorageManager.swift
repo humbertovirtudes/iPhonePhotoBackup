@@ -40,6 +40,15 @@ struct AppSizeResponse: Decodable {
     var warning: String?
 }
 
+struct AppSizesResponse: Decodable {
+    var sizes: [String: AppSizeEntry]
+}
+
+struct AppSizeEntry: Decodable {
+    var bytes: Int64?
+    var parts: [AppPart]?
+}
+
 enum StorageError: LocalizedError {
     case noPython(String)
     case noHelper
@@ -64,7 +73,6 @@ final class StorageManager: NSObject, ObservableObject {
     @Published var apps: [StoredApp] = []
     @Published var sizes: [String: Int64] = [:]
     @Published var sizeParts: [String: [AppPart]] = [:]
-    /// Why a size couldn't be measured (e.g. locked iPhone) — shown in the row.
     @Published var sizeWarnings: [String: String] = [:]
     @Published var sizingInFlight = false
     @Published var isLoadingList = false
@@ -265,44 +273,39 @@ final class StorageManager: NSObject, ObservableObject {
         }
     }
 
-    /// Loads container sizes for user apps in the background (4 at a time).
-    /// System apps have no vendable container and stay "—".
+    /// Loads sizes for ALL apps with a single Lookup (works for system apps
+    /// too, and even while the phone is locked).
     func loadSizes() {
-        let targets = apps.filter(\.isUserApp)
-        guard !targets.isEmpty, !sizingInFlight else { return }
+        let ids = apps.map(\.id)
+        guard !ids.isEmpty, !sizingInFlight else { return }
         sizingInFlight = true
-        statusMessage = "Measuring app data (keep the iPhone unlocked)…"
-        DispatchQueue.global(qos: .utility).async {
-            let group = DispatchGroup()
-            let sema = DispatchSemaphore(value: 4)
-            var failed = 0
-            let failedLock = NSLock()
-            for app in targets {
-                sema.wait()
-                group.enter()
-                self.runHelper(["size", app.id], timeout: 240) { [weak self] result in
-                    defer { sema.signal(); group.leave() }
-                    guard let self else { return }
-                    if case .success(let data) = result,
-                       let resp = try? JSONDecoder().decode(AppSizeResponse.self, from: data) {
-                        if let bytes = resp.bytes {
-                            self.sizes[app.id] = bytes
-                            if let parts = resp.parts { self.sizeParts[app.id] = parts }
-                        } else {
-                            self.sizeWarnings[app.id] = resp.warning ?? "Container not accessible — unlock the iPhone and Refresh."
-                        }
-                    } else {
-                        failedLock.lock()
-                        failed += 1
-                        failedLock.unlock()
+        statusMessage = "Measuring app sizes…"
+        runHelper(["sizes"] + ids, timeout: 180) { [weak self] result in
+            guard let self else { return }
+            self.sizingInFlight = false
+            switch result {
+            case .failure(let e):
+                self.statusMessage = e.localizedDescription
+            case .success(let data):
+                guard let resp = try? JSONDecoder().decode(AppSizesResponse.self, from: data) else {
+                    self.statusMessage = "Could not parse sizes."
+                    return
+                }
+                var measured = 0
+                for (bid, entry) in resp.sizes {
+                    if let bytes = entry.bytes {
+                        self.sizes[bid] = bytes
+                        measured += 1
+                        if let parts = entry.parts { self.sizeParts[bid] = parts }
                     }
                 }
-            }
-            group.wait()
-            DispatchQueue.main.async {
-                self.sizingInFlight = false
-                if failed > targets.count / 2, !targets.isEmpty {
+                for bid in ids where resp.sizes[bid] == nil {
+                    self.sizeWarnings[bid] = "Not reported by iPhone."
+                }
+                if measured < ids.count / 2 {
                     self.statusMessage = "Could not measure most apps — unlock the iPhone and hit Refresh."
+                } else {
+                    self.statusMessage = "\(self.apps.count) apps — measured \(measured)."
                 }
             }
         }

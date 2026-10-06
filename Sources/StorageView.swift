@@ -7,9 +7,27 @@ import AppKit
 struct StorageView: View {
     @ObservedObject var storage: StorageManager
 
+    enum SortMode: String, CaseIterable, Identifiable {
+        case size, name
+        var id: String { rawValue }
+        var title: String { self == .size ? "Size" : "Name" }
+    }
+
+    /// Single alert source (two `.alert(item:)` on one view conflict —
+    /// only the last one ever presents).
+    enum PendingAction: Identifiable {
+        case delete(StoredApp)
+        var id: String {
+            switch self {
+            case .delete(let a): return "delete-\(a.id)"
+            }
+        }
+    }
+
     @State private var search = ""
     @State private var showSystemApps = false
-    @State private var pendingDelete: StoredApp?
+    @State private var sortMode: SortMode = .size
+    @State private var pendingAction: PendingAction?
     @State private var resultMessage: String?
     @State private var showResult = false
     @State private var deletingID: String?
@@ -20,6 +38,13 @@ struct StorageView: View {
         if !search.isEmpty {
             let q = search.lowercased()
             list = list.filter { $0.name.lowercased().contains(q) || $0.id.lowercased().contains(q) }
+        }
+        switch sortMode {
+        case .name:
+            break // helper order: user apps first, then by name
+        case .size:
+            // Biggest first; unmeasured ("—") sink to the bottom.
+            list.sort { (storage.sizes[$0.id] ?? -1) > (storage.sizes[$1.id] ?? -1) }
         }
         return list
     }
@@ -71,6 +96,13 @@ struct StorageView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 260)
                 Toggle("Show system apps", isOn: $showSystemApps)
+                Picker("Sort", selection: $sortMode) {
+                    ForEach(SortMode.allCases) { s in
+                        Text(s.title).tag(s)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 160)
                 Spacer()
                 if storage.sizingInFlight {
                     ProgressView().scaleEffect(0.7)
@@ -106,7 +138,7 @@ struct StorageView: View {
                         if let parts = storage.sizeParts[app.id], !parts.isEmpty {
                             ForEach(parts, id: \.path) { part in
                                 HStack {
-                                    Text(part.path)
+                                    Text(part.path == "App" ? "App itself" : part.path == "Data" ? "App data" : part.path)
                                         .font(.caption2)
                                     Spacer()
                                     Text(StorageManager.sizeString(part.bytes))
@@ -120,7 +152,7 @@ struct StorageView: View {
                                 .foregroundStyle(.orange)
                                 .textSelection(.enabled)
                         } else {
-                            Text("Expand after measuring — per-folder sizes appear here.")
+                            Text("Expand after measuring — App/Data split appears here.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -148,7 +180,7 @@ struct StorageView: View {
                                     .help("No size: container not accessible (unlock iPhone) or system app")
                             }
                         Button {
-                            pendingDelete = app
+                            pendingAction = .delete(app)
                         } label: {
                             Image(systemName: "trash")
                         }
@@ -171,26 +203,29 @@ struct StorageView: View {
                 storage.refreshApps { _ in storage.loadSizes() }
             }
         }
-        .alert(item: $pendingDelete) { app in
-            Alert(
-                title: Text("Delete \(app.name)?"),
-                message: Text("This permanently removes \(app.name) (\(app.id)) and its data from the iPhone. System apps iOS protects will fail with a device error."),
-                primaryButton: .destructive(Text("Delete")) {
-                    deletingID = app.id
-                    storage.uninstall(app) { result in
-                        deletingID = nil
-                        switch result {
-                        case .success(let msg):
-                            resultMessage = msg
-                        case .failure(let e):
-                            resultMessage = "Could not delete \(app.name): \(e.localizedDescription)"
+        .alert(item: $pendingAction) { action in
+            switch action {
+            case .delete(let app):
+                Alert(
+                    title: Text("Delete \(app.name)?"),
+                    message: Text("This permanently removes \(app.name) (\(app.id)) and its data from the iPhone. System apps iOS protects will fail with a device error."),
+                    primaryButton: .destructive(Text("Delete")) {
+                        deletingID = app.id
+                        storage.uninstall(app) { result in
+                            deletingID = nil
+                            switch result {
+                            case .success(let msg):
+                                resultMessage = msg
+                            case .failure(let e):
+                                resultMessage = "Could not delete \(app.name): \(e.localizedDescription)"
+                            }
+                            showResult = true
+                            storage.refreshApps { _ in storage.loadSizes() }
                         }
-                        showResult = true
-                        storage.refreshApps { _ in storage.loadSizes() }
-                    }
-                },
-                secondaryButton: .cancel()
-            )
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
         }
         .alert("Storage", isPresented: $showResult) {
             Button("OK") {}

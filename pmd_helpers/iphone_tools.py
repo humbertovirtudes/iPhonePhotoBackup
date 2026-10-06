@@ -6,6 +6,8 @@ Usage:
     iphone_tools.py list                  -> {"apps": [{id,name,type,container,version}]}
     iphone_tools.py size <bundle-id>      -> {"id": .., "bytes": N | null,
                                               "parts": [{path,size}]}
+    iphone_tools.py sizes <bid>...        -> {"sizes": {bid: {"bytes": N|null,
+                                              "parts": [...]}}} (one Lookup)
     iphone_tools.py uninstall <bundle-id> -> {"id": .., "ok": true}
 
 Sizes come from installation_proxy disk-usage keys (no container access
@@ -57,10 +59,14 @@ async def cmd_size(bid):
     raw = await InstallationProxyService(lockdown).lookup(
         {"BundleIDs": [bid], "ReturnAttributes": ["StaticDiskUsage", "DynamicDiskUsage"]})
     meta = raw.get(bid, {}) if isinstance(raw, dict) else {}
+    entry = _sized_entry(meta)
+    entry["id"] = bid
+    print(json.dumps(entry))
 
+
+def _sized_entry(meta):
     def num(v):
         return int(v) if isinstance(v, (int, float)) else None
-
     static = num(meta.get("StaticDiskUsage"))
     dynamic = num(meta.get("DynamicDiskUsage"))
     parts = []
@@ -69,11 +75,23 @@ async def cmd_size(bid):
     if dynamic is not None:
         parts.append({"path": "Data", "bytes": dynamic})
     total = (static or 0) + (dynamic or 0)
-    print(json.dumps({
-        "id": bid,
+    return {
         "bytes": total if (static is not None or dynamic is not None) else None,
         "parts": parts,
-    }))
+    }
+
+
+async def cmd_sizes(bids):
+    lockdown = create_using_usbmux()
+    if asyncio.iscoroutine(lockdown):
+        lockdown = await lockdown
+    raw = await InstallationProxyService(lockdown).lookup(
+        {"BundleIDs": bids, "ReturnAttributes": ["StaticDiskUsage", "DynamicDiskUsage"]})
+    out = {}
+    for bid in bids:
+        meta = raw.get(bid, {}) if isinstance(raw, dict) else {}
+        out[bid] = _sized_entry(meta)
+    print(json.dumps({"sizes": out}))
 
 
 async def cmd_uninstall(bid):
@@ -87,8 +105,8 @@ async def cmd_uninstall(bid):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("list", "size", "uninstall"):
-        print("usage: iphone_tools.py [list|size <bid>|uninstall <bid>]",
+    if len(argv) < 2 or argv[1] not in ("list", "size", "sizes", "uninstall"):
+        print("usage: iphone_tools.py [list|size <bid>|sizes <bid>...|uninstall <bid>]",
               file=sys.stderr)
         return 2
     try:
@@ -99,6 +117,11 @@ def main(argv):
                 print("usage: iphone_tools.py size <bundle-id>", file=sys.stderr)
                 return 2
             asyncio.run(cmd_size(argv[2]))
+        elif argv[1] == "sizes":
+            if len(argv) < 3:
+                print("usage: iphone_tools.py sizes <bid>...", file=sys.stderr)
+                return 2
+            asyncio.run(cmd_sizes(argv[2:]))
         else:
             if len(argv) < 3:
                 print("usage: iphone_tools.py uninstall <bundle-id>", file=sys.stderr)
