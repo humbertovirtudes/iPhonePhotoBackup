@@ -16,8 +16,10 @@ to any folder on this Mac, including an external hard drive.
 ## Requirements
 
 - macOS 13 Ventura or later (arm64/Intel)
-- **Xcode 15+** (project + 37-test suite build with `xcodebuild`)
+- **Xcode 15+** (project + 47-test suite build with `xcodebuild`)
 - iPhone + USB cable (USB-C/Lightning). Unlock + tap **Trust** when prompted.
+- Storage tab only: Python 3 with pymobiledevice3 (`/usr/bin/python3 -m pip install --user pymobiledevice3`).
+  The app is intentionally **not sandboxed** (USB system socket + helper subprocesses).
 
 ## Sources
 
@@ -51,6 +53,9 @@ xcodebuild test -project iPhonePhotoBackup.xcodeproj -scheme iPhonePhotoBackup \
 5. Watch progress + log at the bottom.
 6. **Reorganize folder** (sidebar): point at any backup, pick a target layout (incl. Location via EXIF GPS),
    Preview (dry run) first, then Reorganize. Empty folders are removed afterwards.
+7. **Storage tab**: list installed apps with container sizes (user apps), search, and delete
+   what you don't need (incl. removable Apple apps like Maps). Deletions are permanent;
+   protected system apps fail with a device error.
 
 ## Troubleshooting
 

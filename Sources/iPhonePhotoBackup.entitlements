@@ -2,15 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>com.apple.security.app-sandbox</key>
+	<!-- NOTE: intentionally NOT sandboxed. The Storage tab talks to the
+	     iPhone over the system usbmux socket and shells out to Python,
+	     neither of which is possible from the app sandbox. -->
+	<key>com.apple.security.device.usb</key>
 	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
-	<key>com.apple.security.device.usb</key>
+	<key>com.apple.security.assets.pictures.read-only</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
-	<key>com.apple.security.assets.pictures.read-only</key>
-	<true/>
 </dict>
 </plist>
+

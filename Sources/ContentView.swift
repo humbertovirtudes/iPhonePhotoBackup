@@ -10,6 +10,9 @@ struct ContentView: View {
     @StateObject private var camera = CameraManager()
     @StateObject private var importer = ImportManager()
     @StateObject private var reorganizer = Reorganizer()
+    @StateObject private var storage = StorageManager()
+
+    @State private var tab = 0
 
     @State private var destination: URL?
     @State private var selection = Set<String>()
@@ -29,23 +32,30 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                header
-                Divider()
-                HStack(alignment: .top, spacing: 0) {
-                    grid
-                    sidebar
+        TabView(selection: $tab) {
+            ZStack {
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                    HStack(alignment: .top, spacing: 0) {
+                        grid
+                        sidebar
+                    }
+                    Divider()
+                    footer
                 }
-                Divider()
-                footer
+                if reorganizer.isRunning {
+                    ReorganizeBlockingOverlay(reorganizer: reorganizer)
+                }
+                if importer.isImporting {
+                    ImportBlockingOverlay(importer: importer)
+                }
             }
-            if reorganizer.isRunning {
-                ReorganizeBlockingOverlay(reorganizer: reorganizer)
-            }
-            if importer.isImporting {
-                ImportBlockingOverlay(importer: importer)
-            }
+            .tabItem { Label("Photos", systemImage: "photo") }
+            .tag(0)
+            StorageView(storage: storage)
+                .tabItem { Label("Storage", systemImage: "internaldrive") }
+                .tag(1)
         }
         .onAppear {
             restoreDestination()

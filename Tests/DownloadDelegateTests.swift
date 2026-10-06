@@ -21,6 +21,28 @@ final class DownloadDelegateTests: XCTestCase {
     }
 }
 
+final class StorageModelTests: XCTestCase {
+    func testAppListDecodes() throws {
+        let json = """
+        {"apps": [
+          {"id": "com.apple.Maps", "name": "Maps", "type": "System", "container": "/private/x", "version": "1.0"},
+          {"id": "com.example.app", "name": "Example", "type": "User", "container": null, "version": "2.0"}
+        ]}
+        """.data(using: .utf8)!
+        let list = try JSONDecoder().decode(AppListResponse.self, from: json)
+        XCTAssertEqual(list.apps.count, 2)
+        XCTAssertFalse(list.apps[0].isUserApp)
+        XCTAssertTrue(list.apps[1].isUserApp)
+        XCTAssertNil(list.apps[1].container)
+    }
+
+    func testSizeString() {
+        XCTAssertEqual(StorageManager.sizeString(nil), "—")
+        XCTAssertEqual(StorageManager.sizeString(-1), "—")
+        XCTAssertFalse(StorageManager.sizeString(1_500_000_000).isEmpty)
+    }
+}
+
 final class InFlightBytesTests: XCTestCase {
     var dir: URL!
 

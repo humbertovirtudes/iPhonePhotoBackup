@@ -22,6 +22,9 @@
 		000000000000000000000037 = {isa = PBXBuildFile; fileRef = 000000000000000000000035; };
 		000000000000000000000038 = {isa = PBXBuildFile; fileRef = 000000000000000000000036; };
 		00000000000000000000003A = {isa = PBXBuildFile; fileRef = 000000000000000000000039; };
+		00000000000000000000003D = {isa = PBXBuildFile; fileRef = 00000000000000000000003B; };
+		00000000000000000000003E = {isa = PBXBuildFile; fileRef = 00000000000000000000003C; };
+		000000000000000000000040 = {isa = PBXBuildFile; fileRef = 00000000000000000000003F; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +46,9 @@
 		000000000000000000000035 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reorganizer.swift; sourceTree = "<group>"; };
 		000000000000000000000036 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReorganizePanel.swift; sourceTree = "<group>"; };
 		000000000000000000000039 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadDelegateTests.swift; sourceTree = "<group>"; };
+		00000000000000000000003B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageManager.swift; sourceTree = "<group>"; };
+		00000000000000000000003C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageView.swift; sourceTree = "<group>"; };
+		00000000000000000000003F = {isa = PBXFileReference; lastKnownFileType = folder; name = pmd_helpers; path = pmd_helpers; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,6 +79,7 @@
 				00000000000000000000002F,
 				000000000000000000000004,
 				000000000000000000000005,
+				00000000000000000000003F,
 			);
 			sourceTree = "<group>";
 		};
@@ -87,6 +94,8 @@
 				00000000000000000000001D,
 				000000000000000000000035,
 				000000000000000000000036,
+				00000000000000000000003B,
+				00000000000000000000003C,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -129,6 +138,7 @@
 				000000000000000000000008,
 				000000000000000000000009,
 				00000000000000000000000A,
+				000000000000000000000041,
 			);
 			buildRules = (
 			);
@@ -223,6 +233,8 @@
 				00000000000000000000001C,
 				000000000000000000000037,
 				000000000000000000000038,
+				00000000000000000000003D,
+				00000000000000000000003E,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -247,6 +259,20 @@
 /* Begin PBXContainerItemProxy section */
 		000000000000000000000027 = {isa = PBXContainerItemProxy; containerPortal = 000000000000000000000001; proxyType = 1; remoteGlobalIDString = 000000000000000000000006; remoteInfo = iPhonePhotoBackup; };
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		000000000000000000000041 = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 7;
+			files = (
+				000000000000000000000040,
+			);
+			name = "Copy Helpers";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		00000000000000000000000D = {
@@ -302,7 +328,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -330,7 +356,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
