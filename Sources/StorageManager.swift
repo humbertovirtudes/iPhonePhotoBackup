@@ -28,9 +28,15 @@ struct AppListResponse: Decodable {
     var apps: [StoredApp]
 }
 
+struct AppPart: Decodable, Hashable {
+    var path: String
+    var bytes: Int64
+}
+
 struct AppSizeResponse: Decodable {
     var id: String
     var bytes: Int64?
+    var parts: [AppPart]?
     var warning: String?
 }
 
@@ -57,6 +63,7 @@ enum StorageError: LocalizedError {
 final class StorageManager: NSObject, ObservableObject {
     @Published var apps: [StoredApp] = []
     @Published var sizes: [String: Int64] = [:]
+    @Published var sizeParts: [String: [AppPart]] = [:]
     @Published var sizingInFlight = false
     @Published var isLoadingList = false
     @Published var statusMessage = "Connect an iPhone via USB, then Refresh."
@@ -256,9 +263,12 @@ final class StorageManager: NSObject, ObservableObject {
         let targets = apps.filter(\.isUserApp)
         guard !targets.isEmpty, !sizingInFlight else { return }
         sizingInFlight = true
+        statusMessage = "Measuring app data (keep the iPhone unlocked)…"
         DispatchQueue.global(qos: .utility).async {
             let group = DispatchGroup()
             let sema = DispatchSemaphore(value: 4)
+            var failed = 0
+            let failedLock = NSLock()
             for app in targets {
                 sema.wait()
                 group.enter()
@@ -269,11 +279,21 @@ final class StorageManager: NSObject, ObservableObject {
                        let resp = try? JSONDecoder().decode(AppSizeResponse.self, from: data),
                        let bytes = resp.bytes {
                         self.sizes[app.id] = bytes
+                        if let parts = resp.parts { self.sizeParts[app.id] = parts }
+                    } else {
+                        failedLock.lock()
+                        failed += 1
+                        failedLock.unlock()
                     }
                 }
             }
             group.wait()
-            DispatchQueue.main.async { self.sizingInFlight = false }
+            DispatchQueue.main.async {
+                self.sizingInFlight = false
+                if failed > targets.count / 2, !targets.isEmpty {
+                    self.statusMessage = "Could not measure most apps — unlock the iPhone and hit Refresh."
+                }
+            }
         }
     }
 

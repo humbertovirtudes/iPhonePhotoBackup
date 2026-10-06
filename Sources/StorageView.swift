@@ -103,45 +103,65 @@ struct StorageView: View {
                 Spacer()
             } else {
                 List(filtered) { app in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(app.name)
-                                .font(.body)
-                            Text("\(app.id) · \(app.version)")
+                    DisclosureGroup {
+                        if let parts = storage.sizeParts[app.id], !parts.isEmpty {
+                            ForEach(parts, id: \.path) { part in
+                                HStack {
+                                    Text(part.path)
+                                        .font(.caption2)
+                                    Spacer()
+                                    Text(StorageManager.sizeString(part.bytes))
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } else {
+                            Text("Expand after measuring — per-folder sizes appear here.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
                         }
-                        Spacer()
-                        if let bytes = storage.sizes[app.id] {
-                            Text(StorageManager.sizeString(bytes))
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                        } else if app.isUserApp && storage.sizingInFlight {
-                            ProgressView().scaleEffect(0.6)
-                        } else {
-                            Text("—")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(app.name)
+                                    .font(.body)
+                                Text("\(app.id) · \(app.version)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            Spacer()
+                            if let bytes = storage.sizes[app.id] {
+                                Text(StorageManager.sizeString(bytes))
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            } else if app.isUserApp && storage.sizingInFlight {
+                                ProgressView().scaleEffect(0.6)
+                            } else {
+                                Text("—")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                                    .help("No size: container not accessible (unlock iPhone) or system app")
+                            }
+                            Button {
+                                pendingWipe = app
+                            } label: {
+                                Image(systemName: "eraser")
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.orange)
+                            .disabled(deletingID != nil)
+                            .help("Clear \(app.name)'s data (offline files, caches) — keeps the app installed")
+                            Button {
+                                pendingDelete = app
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.red)
+                            .disabled(deletingID != nil)
+                            .help("Delete \(app.name) from the iPhone (permanent)")
                         }
-                        Button {
-                            pendingWipe = app
-                        } label: {
-                            Image(systemName: "eraser")
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.orange)
-                        .disabled(deletingID != nil)
-                        .help("Clear \(app.name)'s data (offline files, caches) — keeps the app installed")
-                        Button {
-                            pendingDelete = app
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.red)
-                        .disabled(deletingID != nil)
-                        .help("Delete \(app.name) from the iPhone (permanent)")
                     }
                     .padding(.vertical, 2)
                 }

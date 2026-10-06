@@ -51,6 +51,13 @@ final class HelperCLITests: XCTestCase {
         XCTAssertEqual(r.freed, 123456)
         XCTAssertEqual(r.removed, 7)
     }
+
+    func testSizeResponseWithPartsDecodes() throws {
+        let json = #"{"id":"x","bytes":300,"parts":[{"path":"Documents","bytes":200},{"path":"Library","bytes":100}]}"#.data(using: .utf8)!
+        let r = try JSONDecoder().decode(AppSizeResponse.self, from: json)
+        XCTAssertEqual(r.bytes, 300)
+        XCTAssertEqual(r.parts?.map(\.path), ["Documents", "Library"])
+    }
 }
 
 final class StorageModelTests: XCTestCase {

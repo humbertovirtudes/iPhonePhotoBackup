@@ -51,22 +51,33 @@ def cmd_list():
     print(json.dumps({"apps": apps}))
 
 
-def walk_size(afc, root):
+def walk_parts(afc, root):
+    """(total bytes, {top-level dir: bytes}) under root; (None, {}) on failure."""
     total = 0
+    parts = {}
     try:
         walker = afc.walk(root)
     except Exception:
-        return None
+        return None, {}
     try:
         for dirpath, _dirnames, filenames in walker:
             for fn in filenames:
                 try:
                     st = afc.stat(dirpath.rstrip("/") + "/" + fn)
-                    total += int(getattr(st, "st_size", 0) or 0)
+                    sz = int(getattr(st, "st_size", 0) or 0)
                 except Exception:
                     continue
+                total += sz
+                rel = dirpath[len(root):].strip("/")
+                first = rel.split("/")[0] if rel else "(top level)"
+                parts[first] = parts.get(first, 0) + sz
     except Exception:
-        return None
+        return None, {}
+    return total, parts
+
+
+def walk_size(afc, root):
+    total, _ = walk_parts(afc, root)
     return total
 
 
@@ -87,7 +98,12 @@ async def cmd_size(bid):
     except Exception as e:
         print(json.dumps({"id": bid, "bytes": None, "warning": f"house_arrest: {e}"}))
         return
-    print(json.dumps({"id": bid, "bytes": walk_size(ha, "/")}))
+    total, parts = walk_parts(ha, "/")
+    print(json.dumps({
+        "id": bid,
+        "bytes": total,
+        "parts": [{"path": k, "bytes": v} for k, v in sorted(parts.items(), key=lambda kv: -kv[1])],
+    }))
 
 
 async def cmd_uninstall(bid):
