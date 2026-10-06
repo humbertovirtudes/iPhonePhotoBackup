@@ -42,6 +42,9 @@ final class ImportManager: NSObject, ObservableObject {
     /// even when the phone sends no progress callbacks at all.
     private var pollTimer: Timer?
     private var lastPolledSize: Int64 = -1
+    private var loggedTempNames: Set<String> = []
+    /// Keeps the Mac awake (no system sleep) for the whole import run.
+    private var powerAssertion: NSObjectProtocol?
     private var activeItem: PhotoItem?
     private var activeDest: URL?
     private var downloadStartTime = Date()
@@ -50,6 +53,7 @@ final class ImportManager: NSObject, ObservableObject {
     func cancel() {
         cancelled = true
         stopTransferTimers()
+        endPowerAssertion()
         activeFile = nil
         // Dismiss the overlay right away; any late download callback for
         // the abandoned file is ignored via the activeFile check.
@@ -107,6 +111,10 @@ final class ImportManager: NSObject, ObservableObject {
         self.scheme = scheme
         cancelled = false
         isImporting = true
+        endPowerAssertion()
+        powerAssertion = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleSystemSleepDisabled],
+            reason: "Importing photos from iPhone")
         progress = 0
         importedCount = 0
         skippedCount = 0
@@ -192,6 +200,7 @@ final class ImportManager: NSObject, ObservableObject {
             self.seenProgress = false
             self.lastLoggedMilestone = 0
             self.lastPolledSize = -1
+            self.loggedTempNames = []
             self.downloadStartTime = Date()
             let sizeString: String = {
                 let f = ByteCountFormatter()
@@ -265,14 +274,29 @@ final class ImportManager: NSObject, ObservableObject {
         pollTimer = nil
     }
 
+    private func endPowerAssertion() {
+        if let a = powerAssertion {
+            ProcessInfo.processInfo.endActivity(a)
+            powerAssertion = nil
+        }
+    }
+
     private func pollDownload() {
         guard isImporting, !cancelled,
               activeFile != nil, let dest = activeDest else {
             stopPoll()
             return
         }
-        guard let size = (try? FileManager.default.attributesOfItem(atPath: dest.path)[.size]) as? NSNumber else { return }
-        let bytes = size.int64Value
+        // Bytes may land in the final file, a hidden temp file, or sidecars —
+        // count everything in the folder written since this transfer started.
+        let (bytes, temps) = Self.inFlightBytes(
+            in: dest.deletingLastPathComponent(),
+            destName: dest.lastPathComponent,
+            since: downloadStartTime)
+        for t in temps where !loggedTempNames.contains(t) {
+            loggedTempNames.insert(t)
+            log("Buffering via \(t)…")
+        }
         guard bytes != lastPolledSize else { return } // no growth; watchdog decides stalls
         lastPolledSize = bytes
         currentFileDownloadedBytes = bytes
@@ -281,6 +305,29 @@ final class ImportManager: NSObject, ObservableObject {
         let done = totalCount - queue.count
         progress = (Double(done - 1) + currentFileFraction) / Double(max(totalCount, 1))
         startWatchdog(generation: transferGeneration, fileName: activeFile?.name ?? "file")
+    }
+
+    /// Bytes attributable to the in-flight transfer: the destination file
+    /// itself plus hidden temp files and sidecars written since `since`.
+    /// Older unrelated files in the same folder are ignored.
+    static func inFlightBytes(in dir: URL, destName: String, since: Date) -> (bytes: Int64, tempNames: [String]) {
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return (0, []) }
+        var bytes: Int64 = 0
+        var temps: [String] = []
+        for n in items {
+            let u = dir.appendingPathComponent(n)
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: u.path),
+                  let size = attrs[.size] as? NSNumber else { continue }
+            if n == destName {
+                bytes += size.int64Value
+                continue
+            }
+            let mod = attrs[.modificationDate] as? Date
+            guard n.hasPrefix(".") || (mod.map { $0 >= since } ?? false) else { continue }
+            bytes += size.int64Value
+            temps.append(n)
+        }
+        return (bytes, temps)
     }
 
     @objc func didDownloadFile(
@@ -355,6 +402,7 @@ final class ImportManager: NSObject, ObservableObject {
 
     private func finish() {
         DispatchQueue.main.async {
+            self.endPowerAssertion()
             // A fresh import may already be running after a cancel; only
             // summarize the run that actually completed.
             guard !self.cancelled else {

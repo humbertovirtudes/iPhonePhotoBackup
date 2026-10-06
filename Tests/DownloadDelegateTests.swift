@@ -20,3 +20,51 @@ final class DownloadDelegateTests: XCTestCase {
             "didReceiveDownloadProgressForFile:downloadedBytes:maxBytes:")
     }
 }
+
+final class InFlightBytesTests: XCTestCase {
+    var dir: URL!
+
+    override func setUp() {
+        super.setUp()
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: dir)
+        super.tearDown()
+    }
+
+    private func write(_ name: String, bytes: Int, modDate: Date? = nil) throws {
+        let url = dir.appendingPathComponent(name)
+        try Data(repeating: 0xAB, count: bytes).write(to: url)
+        if let modDate {
+            try FileManager.default.setAttributes([.modificationDate: modDate], ofItemAtPath: url.path)
+        }
+    }
+
+    func testCountsTargetHiddenTempAndFreshSidecars() throws {
+        let since = Date()
+        try write("IMG.MOV", bytes: 100)
+        try write(".IMG.MOV.sb-1234", bytes: 50)
+        try write("IMG.AAE", bytes: 10)
+        let (bytes, temps) = ImportManager.inFlightBytes(in: dir, destName: "IMG.MOV", since: since)
+        XCTAssertEqual(bytes, 160)
+        XCTAssertEqual(Set(temps), [".IMG.MOV.sb-1234", "IMG.AAE"])
+    }
+
+    func testIgnoresOldUnrelatedFiles() throws {
+        let since = Date()
+        try write("IMG.MOV", bytes: 100)
+        try write("older.HEIC", bytes: 9000, modDate: Date(timeIntervalSinceNow: -3600))
+        let (bytes, _) = ImportManager.inFlightBytes(in: dir, destName: "IMG.MOV", since: since)
+        XCTAssertEqual(bytes, 100)
+    }
+
+    func testMissingDirectoryIsZero() {
+        let (bytes, temps) = ImportManager.inFlightBytes(
+            in: dir.appendingPathComponent("nope"), destName: "x", since: Date())
+        XCTAssertEqual(bytes, 0)
+        XCTAssertTrue(temps.isEmpty)
+    }
+}
